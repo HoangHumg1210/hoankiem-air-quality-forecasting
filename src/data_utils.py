@@ -11,7 +11,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 TARGET = "PM25"
 LOOKBACK = 336
-HORIZON = 8
+HORIZON = 72
 
 # Mặc định trước đây dùng log1p cho target.
 # Giữ lại cờ USE_LOG_TARGET để tương thích ngược,
@@ -221,21 +221,27 @@ def inverse_transform_target(y, scaler_y, inverse_func):
     return inverse_func(y_inv_scaled)
 
 
-def create_sequences(X, y, lookback=LOOKBACK, horizon=HORIZON):
+def create_sequences_1(X, y, lookback=LOOKBACK, horizon=HORIZON):
     X = np.asarray(X)
     y = np.asarray(y)
 
     if y.ndim == 1:
         y = y.reshape(-1, 1)
 
+    # ép về 1 chiều để dễ cắt cửa sổ target
+    y_1d = y.reshape(-1)
+
     X_seq, y_seq = [], []
 
-    for i in range(lookback, len(X) - horizon + 1):
-        X_seq.append(X[i - lookback:i])
-        y_seq.append(y[i + horizon - 1])
+    for i in range(len(X) - lookback - horizon + 1):
+        X_seq.append(X[i : i + lookback])
+        y_seq.append(y_1d[i + lookback : i + lookback + horizon])
 
     if len(X_seq) == 0:
-        return np.empty((0, lookback, X.shape[1])), np.empty((0, y.shape[1]))
+        return (
+            np.empty((0, lookback, X.shape[1]), dtype=np.float32),
+            np.empty((0, horizon), dtype=np.float32),
+        )
 
     return np.asarray(X_seq, dtype=np.float32), np.asarray(y_seq, dtype=np.float32)
 
@@ -287,9 +293,9 @@ def main():
     print("X_test :", X_test.shape, "y_test :", y_test.shape)
 
     # 6) Create sequences
-    X_train_seq, y_train_seq = create_sequences(X_train, y_train, LOOKBACK, HORIZON)
-    X_val_seq, y_val_seq = create_sequences(X_val, y_val, LOOKBACK, HORIZON)
-    X_test_seq, y_test_seq = create_sequences(X_test, y_test, LOOKBACK, HORIZON)
+    X_train_seq, y_train_seq = create_sequences_1(X_train, y_train, LOOKBACK, HORIZON)
+    X_val_seq, y_val_seq = create_sequences_1(X_val, y_val, LOOKBACK, HORIZON)
+    X_test_seq, y_test_seq = create_sequences_1(X_test, y_test, LOOKBACK, HORIZON)
 
     print("Sequence shapes:")
     print("Train:", X_train_seq.shape, y_train_seq.shape)
