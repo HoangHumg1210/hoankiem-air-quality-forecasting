@@ -1,402 +1,244 @@
-# import pandas as pd
-# import numpy as np
-# import tensorflow as tf
-# import random
-
-# from sklearn.compose import ColumnTransformer
-# from sklearn.preprocessing import OneHotEncoder, StandardScaler
-# from sklearn.metrics import mean_absolute_error, mean_squared_error
-
-
-
-# TARGET = "PM25"
-# LOOKBACK = 336
-# HORIZON = 72
-
-# # Mặc định trước đây dùng log1p cho target.
-# # Giữ lại cờ USE_LOG_TARGET để tương thích ngược,
-# # nhưng ưu tiên dùng tham số transform trong hàm transform_target.
-# USE_LOG_TARGET = True
-
-# # Các lựa chọn transform cho target:
-# # - "log"  : log1p(x)
-# # - "sqrt" : sqrt(x)
-# # - "none" : giữ nguyên
-# TARGET_TRANSFORM = "log"
-
-# DATA_PATH = "data/processed/data2225_done.csv"
-
-
-
-# def set_seed(seed=42):
-#     np.random.seed(seed)
-#     random.seed(seed)
-#     tf.random.set_seed(seed)
-
-
-
-# def load_and_clean_data(path):
-#     df = pd.read_csv(path)
-
-#     if "Local Time" not in df.columns:
-#         raise KeyError("Không tìm thấy cột 'Local Time' trong dữ liệu.")
-#     if TARGET not in df.columns:
-#         raise KeyError(f"Không tìm thấy cột target '{TARGET}' trong dữ liệu.")
-
-#     df["Local Time"] = pd.to_datetime(df["Local Time"])
-#     df = df.set_index("Local Time").sort_index()
-
-#     df = df[~df.index.duplicated(keep="last")]
-#     df = df.asfreq("1h")
-
-#     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-#     if len(num_cols) > 0:
-#         df[num_cols] = df[num_cols].interpolate(method="time").ffill().bfill()
-
-#     if "IsHoliday" in df.columns:
-#         df["IsHoliday"] = df["IsHoliday"].ffill().bfill().astype(int)
-
-#     obj_cols = df.select_dtypes(include=["object"]).columns.tolist()
-#     for col in obj_cols:
-#         df[col] = df[col].ffill().bfill()
-
-#     return df
-
-
-# # TIME FEATURES
-# def add_time_features(df):
-#     idx = df.index
-
-#     df["day_of_week"] = idx.dayofweek
-#     df["month"] = idx.month
-#     df["hour"] = idx.hour
-#     df["is_weekend"] = (idx.dayofweek >= 5).astype(int)
-
-#     df["hour_sin"] = np.sin(2 * np.pi * idx.hour / 24)
-#     df["hour_cos"] = np.cos(2 * np.pi * idx.hour / 24)
-
-#     df["dow_sin"] = np.sin(2 * np.pi * idx.dayofweek / 7)
-#     df["dow_cos"] = np.cos(2 * np.pi * idx.dayofweek / 7)
-
-#     df["month_sin"] = np.sin(2 * np.pi * idx.month / 12)
-#     df["month_cos"] = np.cos(2 * np.pi * idx.month / 12)
-
-#     return df
-
-
-
-
-# def add_target_features(df, target=TARGET):
-#     for lag in [1, 3, 6, 12, 24, 48]:
-#         df[f"{target}_lag{lag}"] = df[target].shift(lag)
-
-#     # shift(1) để tránh leakage
-#     df[f"{target}_roll_mean_24"] = df[target].shift(1).rolling(24).mean()
-#     df[f"{target}_roll_std_24"] = df[target].shift(1).rolling(24).std()
-#     df[f"{target}_roll_mean_72"] = df[target].shift(1).rolling(72).mean()
-
-#     return df.dropna()
-
-
-
-# def split_data(df):
-#     train_df = df[: "2023-12-31 23:00:00"].copy()
-#     val_df = df["2024-01-01 00:00:00":"2024-12-31 23:00:00"].copy()
-#     test_df = df["2025-01-01 00:00:00":].copy()
-
-#     if len(train_df) == 0:
-#         raise ValueError("Train set rỗng.")
-#     if len(val_df) == 0:
-#         raise ValueError("Validation set rỗng.")
-#     if len(test_df) == 0:
-#         print("Cảnh báo: Test set rỗng. Kiểm tra dữ liệu có năm 2025 hay không.")
-
-#     return train_df, val_df, test_df
-
-
-
-# def transform_target(
-#     train_df,
-#     val_df,
-#     test_df,
-#     target=TARGET,
-#     transform: str | None = None,
-#     use_log: bool | None = None,
-# ):
-#     """
-#     Biến đổi target theo nhiều lựa chọn khác nhau (log / sqrt / none)
-#     mà vẫn đảm bảo không rò rỉ dữ liệu (scaler fit trên train).
-
-#     Thứ tự ưu tiên:
-#     1) Nếu tham số `transform` được truyền (\"log\" / \"sqrt\" / \"none\"),
-#        sẽ dùng trực tiếp.
-#     2) Nếu `transform` = None nhưng `use_log` không None -> dùng use_log
-#        (True -> \"log\", False -> \"none\") để tương thích với code cũ.
-#     3) Nếu cả hai đều None -> dùng TARGET_TRANSFORM / USE_LOG_TARGET.
-#     """
-
-#     # Xác định chế độ transform
-#     if transform is not None:
-#         mode = transform.lower()
-#     elif use_log is not None:
-#         mode = "log" if use_log else "none"
-#     else:
-#         # Backward compatible: ưu tiên TARGET_TRANSFORM nếu hợp lệ,
-#         # nếu không thì quay về USE_LOG_TARGET.
-#         if str(TARGET_TRANSFORM).lower() in {"log", "sqrt", "none"}:
-#             mode = str(TARGET_TRANSFORM).lower()
-#         else:
-#             mode = "log" if USE_LOG_TARGET else "none"
-
-#     if mode not in {"log", "sqrt", "none"}:
-#         raise ValueError(f"Unknown target transform mode: {mode}")
-
-#     def forward(y):
-#         y = np.asarray(y, dtype=np.float64)
-#         y = np.clip(y, 0, None)
-#         if mode == "log":
-#             return np.log1p(y)
-#         if mode == "sqrt":
-#             return np.sqrt(y)
-#         return y
-
-#     def inverse(y):
-#         y = np.asarray(y, dtype=np.float64)
-#         if mode == "log":
-#             return np.expm1(y)
-#         if mode == "sqrt":
-#             # Đảm bảo không sinh giá trị âm do nhiễu số
-#             return np.square(np.clip(y, 0, None))
-#         return y
-
-#     y_train_raw = train_df[[target]].values
-#     y_val_raw = val_df[[target]].values
-#     y_test_raw = test_df[[target]].values if len(test_df) > 0 else np.empty((0, 1))
-
-#     y_train_t = forward(y_train_raw)
-#     y_val_t = forward(y_val_raw)
-#     y_test_t = forward(y_test_raw) if len(y_test_raw) > 0 else y_test_raw
-
-#     scaler_y = StandardScaler()
-#     y_train = scaler_y.fit_transform(y_train_t)
-#     y_val = scaler_y.transform(y_val_t)
-#     y_test = scaler_y.transform(y_test_t) if len(y_test_t) > 0 else y_test_t
-
-#     return y_train, y_val, y_test, scaler_y, inverse
-
-
-
-
-# def preprocess_features(train_df, val_df, test_df, target=TARGET):
-#     X_train_df = train_df.drop(columns=[target]).copy()
-#     X_val_df = val_df.drop(columns=[target]).copy()
-#     X_test_df = test_df.drop(columns=[target]).copy()
-
-#     num_cols = X_train_df.select_dtypes(include=[np.number, "bool"]).columns.tolist()
-#     cat_cols = X_train_df.select_dtypes(include=["object", "category"]).columns.tolist()
-
-#     preprocess = ColumnTransformer(
-#         transformers=[
-#             ("num", StandardScaler(), num_cols),
-#             ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), cat_cols),
-#         ],
-#         remainder="drop"
-#     )
-
-#     X_train = preprocess.fit_transform(X_train_df)
-#     X_val = preprocess.transform(X_val_df)
-#     X_test = preprocess.transform(X_test_df) if len(X_test_df) > 0 else np.empty((0, X_train.shape[1]))
-
-#     X_train = np.asarray(X_train, dtype=np.float32)
-#     X_val = np.asarray(X_val, dtype=np.float32)
-#     X_test = np.asarray(X_test, dtype=np.float32)
-
-#     return X_train, X_val, X_test, preprocess
-
-
-
-# def inverse_transform_target(y, scaler_y, inverse_func):
-#     y = np.asarray(y, dtype=np.float64)
-#     y_inv_scaled = scaler_y.inverse_transform(y)
-#     return inverse_func(y_inv_scaled)
-
-
-# def create_sequences_1(X, y, lookback=LOOKBACK, horizon=HORIZON):
-#     X = np.asarray(X)
-#     y = np.asarray(y)
-
-#     if y.ndim == 1:
-#         y = y.reshape(-1, 1)
-
-#     # ép về 1 chiều để dễ cắt cửa sổ target
-#     y_1d = y.reshape(-1)
-
-#     X_seq, y_seq = [], []
-
-#     for i in range(len(X) - lookback - horizon + 1):
-#         X_seq.append(X[i : i + lookback])
-#         y_seq.append(y_1d[i + lookback : i + lookback + horizon])
-
-#     if len(X_seq) == 0:
-#         return (
-#             np.empty((0, lookback, X.shape[1]), dtype=np.float32),
-#             np.empty((0, horizon), dtype=np.float32),
-#         )
-
-#     return np.asarray(X_seq, dtype=np.float32), np.asarray(y_seq, dtype=np.float32)
-
-
-# def rmse(y_true, y_pred):
-#     return np.sqrt(mean_squared_error(y_true, y_pred))
-
-
-# def evaluate_regression(y_true, y_pred, name="Set"):
-#     mae = mean_absolute_error(y_true, y_pred)
-#     mse = mean_squared_error(y_true, y_pred)
-#     rmse_val = np.sqrt(mse)
-
-#     print(f"{name} MAE : {mae:.4f}")
-#     print(f"{name} MSE : {mse:.4f}")
-#     print(f"{name} RMSE: {rmse_val:.4f}")
-
-
-# def main():
-#     set_seed(42)
-
-#     # 1) Load + clean
-#     df = load_and_clean_data(DATA_PATH)
-#     print("Loaded df:", df.shape)
-
-#     # 2) Feature engineering
-#     df = add_time_features(df)
-#     df = add_target_features(df, target=TARGET)
-#     print("After feature engineering:", df.shape)
-
-#     # 3) Split
-#     train_df, val_df, test_df = split_data(df)
-#     print("Train:", train_df.shape)
-#     print("Val  :", val_df.shape)
-#     print("Test :", test_df.shape)
-
-#     # 4) Transform target
-#     y_train, y_val, y_test, scaler_y, inverse_target_func = transform_target(
-#         train_df, val_df, test_df, target=TARGET, use_log=USE_LOG_TARGET
-#     )
-
-#     # 5) Preprocess features
-#     X_train, X_val, X_test, preprocess = preprocess_features(
-#         train_df, val_df, test_df, target=TARGET
-#     )
-
-#     print("X_train:", X_train.shape, "y_train:", y_train.shape)
-#     print("X_val  :", X_val.shape, "y_val  :", y_val.shape)
-#     print("X_test :", X_test.shape, "y_test :", y_test.shape)
-
-#     # 6) Create sequences
-#     X_train_seq, y_train_seq = create_sequences_1(X_train, y_train, LOOKBACK, HORIZON)
-#     X_val_seq, y_val_seq = create_sequences_1(X_val, y_val, LOOKBACK, HORIZON)
-#     X_test_seq, y_test_seq = create_sequences_1(X_test, y_test, LOOKBACK, HORIZON)
-
-#     print("Sequence shapes:")
-#     print("Train:", X_train_seq.shape, y_train_seq.shape)
-#     print("Val  :", X_val_seq.shape, y_val_seq.shape)
-#     print("Test :", X_test_seq.shape, y_test_seq.shape)
-
-#     if len(X_train_seq) == 0:
-#         raise ValueError("Không tạo được sequence cho train. Kiểm tra LOOKBACK/HORIZON hoặc dữ liệu.")
-#     if len(X_val_seq) == 0:
-#         raise ValueError("Không tạo được sequence cho val. Kiểm tra LOOKBACK/HORIZON hoặc dữ liệu.")
-
-#     n_features = X_train_seq.shape[2]
-#     print("n_features =", n_features)
-
-#     return {
-#         "df": df,
-#         "train_df": train_df,
-#         "val_df": val_df,
-#         "test_df": test_df,
-#         "X_train_seq": X_train_seq,
-#         "y_train_seq": y_train_seq,
-#         "X_val_seq": X_val_seq,
-#         "y_val_seq": y_val_seq,
-#         "X_test_seq": X_test_seq,
-#         "y_test_seq": y_test_seq,
-#         "scaler_y": scaler_y,
-#         "inverse_target_func": inverse_target_func,
-#         "preprocess": preprocess,
-#         "n_features": n_features,
-#     }
-
-
-# if __name__ == "__main__":
-#     artifacts = main()
-import pandas as pd
-import numpy as np
-import tensorflow as tf
 import random
-import math
-import matplotlib.pyplot as plt
+from dataclasses import dataclass, replace
+from typing import Optional
 
+import numpy as np
+import pandas as pd
+import tensorflow as tf
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Dropout, GRU, Dense
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
-TARGET = "PM25"
-LOOKBACK = 336
-HORIZON = 72   # 72 giờ = 3 ngày
+# =========================
+# CONFIG
+# =========================
+@dataclass
+class DataConfig:
+    data_path: str = "data/processed/data2225_done.csv"
+    target: str = "PM25"
+    time_col: str = "Local Time"
 
-USE_LOG_TARGET = True
-TARGET_TRANSFORM = "log"
+    lookback: int = 336
+    horizon: int = 72
 
-DATA_PATH = "data/processed/data2225_done.csv"
+    target_transform: str = "log"   # "log", "sqrt", "none"
+
+    train_end: str = "2023-12-31 23:00:00"
+    val_start: str = "2024-01-01 00:00:00"
+    val_end: str = "2024-12-31 23:00:00"
+    test_start: str = "2025-01-01 00:00:00"
+
+    freq: str = "1h"
+    seed: int = 42
 
 
-def set_seed(seed=42):
+CFG = DataConfig()
+
+
+# =========================
+# REPRODUCIBILITY
+# =========================
+def set_seed(seed: int = 42) -> None:
     np.random.seed(seed)
     random.seed(seed)
     tf.random.set_seed(seed)
 
 
-def load_and_clean_data(path):
+# =========================
+# TARGET TRANSFORM
+# =========================
+class TargetTransformer:
+    def __init__(self, mode: str = "log"):
+        mode = mode.lower()
+        if mode not in {"log", "sqrt", "none"}:
+            raise ValueError(f"Unknown target transform mode: {mode}")
+        self.mode = mode
+        self.scaler = StandardScaler()
+
+    def _validate_non_negative(self, y: np.ndarray) -> None:
+        if np.any(y < 0):
+            raise ValueError(
+                f"Target transform '{self.mode}' does not support negative values."
+            )
+
+    def _forward(self, y: np.ndarray) -> np.ndarray:
+        y = np.asarray(y, dtype=np.float64)
+
+        if self.mode == "log":
+            self._validate_non_negative(y)
+            return np.log1p(y)
+        if self.mode == "sqrt":
+            self._validate_non_negative(y)
+            return np.sqrt(y)
+        return y
+
+    def _inverse(self, y: np.ndarray) -> np.ndarray:
+        y = np.asarray(y, dtype=np.float64)
+
+        if self.mode == "log":
+            return np.expm1(y)
+        if self.mode == "sqrt":
+            return np.square(np.clip(y, 0, None))
+        return y
+
+    def fit(self, y: np.ndarray) -> "TargetTransformer":
+        y_t = self._forward(y)
+        self.scaler.fit(y_t)
+        return self
+
+    def transform(self, y: np.ndarray) -> np.ndarray:
+        y_t = self._forward(y)
+        return self.scaler.transform(y_t)
+
+    def fit_transform(self, y: np.ndarray) -> np.ndarray:
+        y_t = self._forward(y)
+        return self.scaler.fit_transform(y_t)
+
+    def inverse_transform(self, y_scaled: np.ndarray) -> np.ndarray:
+        y_scaled = np.asarray(y_scaled, dtype=np.float64)
+        original_shape = y_scaled.shape
+        y_unscaled = self.scaler.inverse_transform(y_scaled.reshape(-1, 1)).reshape(
+            original_shape
+        )
+        return self._inverse(y_unscaled)
+
+
+# =========================
+# FEATURE PREPROCESSOR
+# =========================
+class FeaturePreprocessor:
+    def __init__(self):
+        self.num_cols: list[str] = []
+        self.cat_cols: list[str] = []
+        self.transformer: Optional[ColumnTransformer] = None
+
+    def fit(self, df: pd.DataFrame, target: str) -> "FeaturePreprocessor":
+        X_df = df.drop(columns=[target]).copy()
+
+        self.num_cols = X_df.select_dtypes(include=[np.number, "bool"]).columns.tolist()
+        self.cat_cols = X_df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+        self.transformer = ColumnTransformer(
+            transformers=[
+                ("num", StandardScaler(), self.num_cols),
+                ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), self.cat_cols),
+            ],
+            remainder="drop",
+        )
+        self.transformer.fit(X_df)
+        return self
+
+    def transform(self, df: pd.DataFrame, target: str) -> np.ndarray:
+        if self.transformer is None:
+            raise ValueError("Preprocessor chưa được fit.")
+
+        X_df = df.drop(columns=[target]).copy()
+        X = self.transformer.transform(X_df)
+        return np.asarray(X, dtype=np.float32)
+
+    def fit_transform(self, df: pd.DataFrame, target: str) -> np.ndarray:
+        self.fit(df, target)
+        return self.transform(df, target)
+
+
+# =========================
+# DATA LOADING & CLEANING
+# =========================
+def load_and_clean_data(path: str, time_col: str, target: str, freq: str = "1h") -> pd.DataFrame:
     df = pd.read_csv(path)
 
-    if "Local Time" not in df.columns:
-        raise KeyError("Không tìm thấy cột 'Local Time' trong dữ liệu.")
-    if TARGET not in df.columns:
-        raise KeyError(f"Không tìm thấy cột target '{TARGET}' trong dữ liệu.")
+    if time_col not in df.columns:
+        raise KeyError(f"Không tìm thấy cột thời gian '{time_col}'.")
+    if target not in df.columns:
+        raise KeyError(f"Không tìm thấy cột target '{target}'.")
 
-    df["Local Time"] = pd.to_datetime(df["Local Time"])
-    df = df.set_index("Local Time").sort_index()
+    df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+    df = df.dropna(subset=[time_col])
 
+    df = df.set_index(time_col).sort_index()
     df = df[~df.index.duplicated(keep="last")]
-    df = df.asfreq("1h")
+    df = df.asfreq(freq)
+    return df
+
+
+def _clean_split_frame(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    if len(num_cols) > 0:
+    if num_cols:
         df[num_cols] = df[num_cols].interpolate(method="time").ffill().bfill()
 
     if "IsHoliday" in df.columns:
-        # tránh warning downcast
-        df["IsHoliday"] = (
-            pd.to_numeric(df["IsHoliday"], errors="coerce")
-            .ffill()
-            .bfill()
-            .astype(int)
-        )
+        holiday = pd.to_numeric(df["IsHoliday"], errors="coerce").ffill().bfill().fillna(0)
+        df["IsHoliday"] = holiday.astype(int)
 
-    obj_cols = df.select_dtypes(include=["object"]).columns.tolist()
+    obj_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
     for col in obj_cols:
         df[col] = df[col].ffill().bfill()
 
     return df
 
 
-def add_time_features(df):
+def _build_context_frame(history_df: pd.DataFrame, current_df: pd.DataFrame, history_len: int) -> pd.DataFrame:
+    if history_df.empty:
+        return current_df.copy()
+
+    context_df = history_df.tail(history_len)
+    return pd.concat([context_df, current_df], axis=0)
+
+
+def _process_frame(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    df = _clean_split_frame(df)
+    df = add_time_features(df)
+    return add_target_features(df, target=target)
+
+
+def _slice_processed_split(
+    df: pd.DataFrame,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> pd.DataFrame:
+    if start is None and end is None:
+        return df.copy()
+
+    start_ts = pd.Timestamp(start) if start is not None else None
+    end_ts = pd.Timestamp(end) if end is not None else None
+
+    mask = pd.Series(True, index=df.index)
+    if start_ts is not None:
+        mask &= df.index >= start_ts
+    if end_ts is not None:
+        mask &= df.index <= end_ts
+    return df.loc[mask].copy()
+
+
+def _filter_sequences_by_time(
+    X_seq: np.ndarray,
+    y_seq: np.ndarray,
+    forecast_times: np.ndarray,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    if len(forecast_times) == 0:
+        return X_seq, y_seq, forecast_times
+
+    forecast_index = pd.DatetimeIndex(forecast_times)
+    mask = np.ones(len(forecast_index), dtype=bool)
+
+    if start is not None:
+        mask &= forecast_index >= pd.Timestamp(start)
+    if end is not None:
+        mask &= forecast_index <= pd.Timestamp(end)
+
+    return X_seq[mask], y_seq[mask], np.asarray(forecast_index[mask])
+
+
+# =========================
+# FEATURE ENGINEERING
+# =========================
+def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
     idx = df.index
 
     df["day_of_week"] = idx.dayofweek
@@ -416,11 +258,13 @@ def add_time_features(df):
     return df
 
 
-def add_target_features(df, target=TARGET):
+def add_target_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    df = df.copy()
+
     for lag in [1, 3, 6, 12, 24, 48]:
         df[f"{target}_lag{lag}"] = df[target].shift(lag)
 
-    # shift(1) để tránh leakage
+    # Dùng shift(1) để tránh leakage.
     df[f"{target}_roll_mean_24"] = df[target].shift(1).rolling(24).mean()
     df[f"{target}_roll_std_24"] = df[target].shift(1).rolling(24).std()
     df[f"{target}_roll_mean_72"] = df[target].shift(1).rolling(72).mean()
@@ -428,114 +272,38 @@ def add_target_features(df, target=TARGET):
     return df.dropna()
 
 
-def split_data(df):
-    train_df = df[: "2023-12-31 23:00:00"].copy()
-    val_df = df["2024-01-01 00:00:00":"2024-12-31 23:00:00"].copy()
-    test_df = df["2025-01-01 00:00:00":].copy()
+# =========================
+# SPLIT
+# =========================
+def split_data(df: pd.DataFrame, cfg: DataConfig):
+    train_df = df.loc[: cfg.train_end].copy()
+    val_df = df.loc[cfg.val_start: cfg.val_end].copy()
+    test_df = df.loc[cfg.test_start:].copy()
 
-    if len(train_df) == 0:
+    if train_df.empty:
         raise ValueError("Train set rỗng.")
-    if len(val_df) == 0:
+    if val_df.empty:
         raise ValueError("Validation set rỗng.")
-    if len(test_df) == 0:
-        print("Cảnh báo: Test set rỗng. Kiểm tra dữ liệu có năm 2025 hay không.")
+    if test_df.empty:
+        print("Cảnh báo: Test set rỗng. Kiểm tra dữ liệu có giai đoạn test hay không.")
 
     return train_df, val_df, test_df
 
 
-def transform_target(
-    train_df,
-    val_df,
-    test_df,
-    target=TARGET,
-    transform: str | None = None,
-    use_log: bool | None = None,
+# =========================
+# SEQUENCE BUILDING
+# =========================
+def create_sequences(
+    X: np.ndarray,
+    y: np.ndarray,
+    time_index: Optional[pd.Index] = None,
+    lookback: int = 336,
+    horizon: int = 72,
 ):
-    if transform is not None:
-        mode = transform.lower()
-    elif use_log is not None:
-        mode = "log" if use_log else "none"
-    else:
-        if str(TARGET_TRANSFORM).lower() in {"log", "sqrt", "none"}:
-            mode = str(TARGET_TRANSFORM).lower()
-        else:
-            mode = "log" if USE_LOG_TARGET else "none"
-
-    if mode not in {"log", "sqrt", "none"}:
-        raise ValueError(f"Unknown target transform mode: {mode}")
-
-    def forward(y):
-        y = np.asarray(y, dtype=np.float64)
-        y = np.clip(y, 0, None)
-        if mode == "log":
-            return np.log1p(y)
-        if mode == "sqrt":
-            return np.sqrt(y)
-        return y
-
-    def inverse(y):
-        y = np.asarray(y, dtype=np.float64)
-        if mode == "log":
-            return np.expm1(y)
-        if mode == "sqrt":
-            return np.square(np.clip(y, 0, None))
-        return y
-
-    y_train_raw = train_df[[target]].values
-    y_val_raw = val_df[[target]].values
-    y_test_raw = test_df[[target]].values if len(test_df) > 0 else np.empty((0, 1))
-
-    y_train_t = forward(y_train_raw)
-    y_val_t = forward(y_val_raw)
-    y_test_t = forward(y_test_raw) if len(y_test_raw) > 0 else y_test_raw
-
-    scaler_y = StandardScaler()
-    y_train = scaler_y.fit_transform(y_train_t)
-    y_val = scaler_y.transform(y_val_t)
-    y_test = scaler_y.transform(y_test_t) if len(y_test_t) > 0 else y_test_t
-
-    return y_train, y_val, y_test, scaler_y, inverse
-
-
-def preprocess_features(train_df, val_df, test_df, target=TARGET):
-    X_train_df = train_df.drop(columns=[target]).copy()
-    X_val_df = val_df.drop(columns=[target]).copy()
-    X_test_df = test_df.drop(columns=[target]).copy()
-
-    num_cols = X_train_df.select_dtypes(include=[np.number, "bool"]).columns.tolist()
-    cat_cols = X_train_df.select_dtypes(include=["object", "category"]).columns.tolist()
-
-    preprocess = ColumnTransformer(
-        transformers=[
-            ("num", StandardScaler(), num_cols),
-            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), cat_cols),
-        ],
-        remainder="drop"
-    )
-
-    X_train = preprocess.fit_transform(X_train_df)
-    X_val = preprocess.transform(X_val_df)
-    X_test = preprocess.transform(X_test_df) if len(X_test_df) > 0 else np.empty((0, X_train.shape[1]))
-
-    X_train = np.asarray(X_train, dtype=np.float32)
-    X_val = np.asarray(X_val, dtype=np.float32)
-    X_test = np.asarray(X_test, dtype=np.float32)
-
-    return X_train, X_val, X_test, preprocess
-
-
-def inverse_transform_target(y, scaler_y, inverse_func):
-    y = np.asarray(y, dtype=np.float64)
-    original_shape = y.shape
-    y_inv_scaled = scaler_y.inverse_transform(y.reshape(-1, 1)).reshape(original_shape)
-    return inverse_func(y_inv_scaled)
-
-
-def create_sequences(X, y, lookback=LOOKBACK, horizon=HORIZON):
     """
-    Multi-step forecasting:
     X_seq shape: (N, lookback, n_features)
     y_seq shape: (N, horizon)
+    forecast_start_times shape: (N,) nếu time_index != None
     """
     X = np.asarray(X)
     y = np.asarray(y)
@@ -546,146 +314,378 @@ def create_sequences(X, y, lookback=LOOKBACK, horizon=HORIZON):
     y_1d = y.reshape(-1)
 
     X_seq, y_seq = [], []
+    forecast_start_times = []
 
-    for i in range(len(X) - lookback - horizon + 1):
+    max_start = len(X) - lookback - horizon + 1
+    if max_start <= 0:
+        empty_X = np.empty((0, lookback, X.shape[1]), dtype=np.float32)
+        empty_y = np.empty((0, horizon), dtype=np.float32)
+
+        if time_index is not None:
+            empty_t = np.array([], dtype="datetime64[ns]")
+            return empty_X, empty_y, empty_t
+        return empty_X, empty_y
+
+    for i in range(max_start):
         X_seq.append(X[i:i + lookback])
         y_seq.append(y_1d[i + lookback:i + lookback + horizon])
 
-    if len(X_seq) == 0:
-        return (
-            np.empty((0, lookback, X.shape[1]), dtype=np.float32),
-            np.empty((0, horizon), dtype=np.float32),
-        )
+        if time_index is not None:
+            forecast_start_times.append(time_index[i + lookback])
 
-    return np.asarray(X_seq, dtype=np.float32), np.asarray(y_seq, dtype=np.float32)
+    X_seq = np.asarray(X_seq, dtype=np.float32)
+    y_seq = np.asarray(y_seq, dtype=np.float32)
+
+    if time_index is not None:
+        return X_seq, y_seq, np.asarray(forecast_start_times)
+
+    return X_seq, y_seq
 
 
-def rmse(y_true, y_pred):
-    return np.sqrt(mean_squared_error(y_true, y_pred))
+# =========================
+# EVALUATION
+# =========================
+def rmse(y_true, y_pred) -> float:
+    return float(np.sqrt(mean_squared_error(y_true, y_pred)))
 
 
-def evaluate_regression(y_true, y_pred, name="Set"):
-    mae = mean_absolute_error(y_true, y_pred)
-    mse = mean_squared_error(y_true, y_pred)
-    rmse_val = np.sqrt(mse)
+def evaluate_regression(y_true, y_pred, name="Set") -> dict:
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+
+    mae = float(mean_absolute_error(y_true.reshape(-1), y_pred.reshape(-1)))
+    mse = float(mean_squared_error(y_true.reshape(-1), y_pred.reshape(-1)))
+    rmse_val = float(np.sqrt(mse))
 
     print(f"{name} MAE : {mae:.4f}")
     print(f"{name} MSE : {mse:.4f}")
     print(f"{name} RMSE: {rmse_val:.4f}")
 
-
-def prepare_sequences_for_experiment(
-    data_path: str,
-    target: str = "PM25",
-    transform: str = "log",
-    lookback: int = 336,
-    horizon: int = 72,
-):
-    df = load_and_clean_data(data_path)
-    df = add_time_features(df)
-    df = add_target_features(df, target=target)
-
-    train_df, val_df, test_df = split_data(df)
-
-    y_train, y_val, y_test, scaler_y, inverse_target_transform = transform_target(
-        train_df,
-        val_df,
-        test_df,
-        target=target,
-        transform=transform,
-    )
-
-    X_train, X_val, X_test, preprocess = preprocess_features(
-        train_df,
-        val_df,
-        test_df,
-        target=target,
-    )
-
-    X_train_seq, y_train_seq = create_sequences(X_train, y_train, lookback=lookback, horizon=horizon)
-    X_val_seq, y_val_seq = create_sequences(X_val, y_val, lookback=lookback, horizon=horizon)
-    X_test_seq, y_test_seq = create_sequences(X_test, y_test, lookback=lookback, horizon=horizon)
-
     return {
-        "df": df,
-        "train_df": train_df,
-        "val_df": val_df,
-        "test_df": test_df,
-        "X_train_seq": X_train_seq,
-        "y_train_seq": y_train_seq,
-        "X_val_seq": X_val_seq,
-        "y_val_seq": y_val_seq,
-        "X_test_seq": X_test_seq,
-        "y_test_seq": y_test_seq,
-        "scaler_y": scaler_y,
-        "inverse_target_transform": inverse_target_transform,
-        "preprocess": preprocess,
-        "lookback": lookback,
-        "horizon": horizon,
-        "transform": transform,
+        "mae": mae,
+        "mse": mse,
+        "rmse": rmse_val,
     }
 
 
-def main():
-    set_seed(42)
+def evaluate_by_horizon(y_true, y_pred) -> pd.DataFrame:
+    y_true = np.asarray(y_true, dtype=np.float64)
+    y_pred = np.asarray(y_pred, dtype=np.float64)
 
-    df = load_and_clean_data(DATA_PATH)
-    print("Loaded df:", df.shape)
+    if y_true.ndim != 2 or y_pred.ndim != 2:
+        raise ValueError("y_true và y_pred phải có shape (N, horizon).")
 
-    df = add_time_features(df)
-    df = add_target_features(df, target=TARGET)
-    print("After feature engineering:", df.shape)
+    rows = []
+    for h in range(y_true.shape[1]):
+        mae_h = mean_absolute_error(y_true[:, h], y_pred[:, h])
+        rmse_h = np.sqrt(mean_squared_error(y_true[:, h], y_pred[:, h]))
+        rows.append({
+            "horizon_step": h + 1,
+            "MAE": mae_h,
+            "RMSE": rmse_h,
+        })
 
-    train_df, val_df, test_df = split_data(df)
-    print("Train:", train_df.shape)
-    print("Val  :", val_df.shape)
-    print("Test :", test_df.shape)
+    return pd.DataFrame(rows)
 
-    y_train, y_val, y_test, scaler_y, inverse_target_func = transform_target(
-        train_df, val_df, test_df, target=TARGET, use_log=USE_LOG_TARGET
+
+# =========================
+# FULL PREP PIPELINE
+# =========================
+def _prepare_dataset_from_raw_splits(
+    raw_train_df: pd.DataFrame,
+    raw_val_df: pd.DataFrame,
+    raw_test_df: pd.DataFrame,
+    cfg: DataConfig,
+    verbose: bool = True,
+):
+    target_feature_history = 72
+    history_len = cfg.lookback + target_feature_history
+
+    train_processed = _process_frame(raw_train_df, target=cfg.target)
+    val_context_raw = _build_context_frame(raw_train_df, raw_val_df, history_len=history_len)
+    val_processed_full = _process_frame(val_context_raw, target=cfg.target)
+    test_history_raw = pd.concat([raw_train_df, raw_val_df], axis=0)
+    test_context_raw = _build_context_frame(test_history_raw, raw_test_df, history_len=history_len)
+    test_processed_full = _process_frame(test_context_raw, target=cfg.target)
+
+    train_df = train_processed.copy()
+    val_df = _slice_processed_split(val_processed_full, start=cfg.val_start, end=cfg.val_end)
+    test_df = _slice_processed_split(test_processed_full, start=cfg.test_start)
+    df = pd.concat([train_df, val_df, test_df], axis=0).sort_index()
+
+    if verbose:
+        print("After feature engineering:", df.shape)
+        print("Train:", train_df.shape)
+        print("Val  :", val_df.shape)
+        print("Test :", test_df.shape)
+
+    target_transformer = TargetTransformer(mode=cfg.target_transform)
+
+    y_train = target_transformer.fit_transform(train_df[[cfg.target]].values)
+    y_val = target_transformer.transform(val_df[[cfg.target]].values)
+    y_test = (
+        target_transformer.transform(test_df[[cfg.target]].values)
+        if not test_df.empty
+        else np.empty((0, 1))
     )
 
-    X_train, X_val, X_test, preprocess = preprocess_features(
-        train_df, val_df, test_df, target=TARGET
+    preprocessor = FeaturePreprocessor()
+    X_train = preprocessor.fit_transform(train_df, target=cfg.target)
+    X_val = preprocessor.transform(val_df, target=cfg.target)
+    X_test = (
+        preprocessor.transform(test_df, target=cfg.target)
+        if not test_df.empty
+        else np.empty((0, X_train.shape[1]), dtype=np.float32)
     )
 
-    print("X_train:", X_train.shape, "y_train:", y_train.shape)
-    print("X_val  :", X_val.shape, "y_val  :", y_val.shape)
-    print("X_test :", X_test.shape, "y_test :", y_test.shape)
+    if verbose:
+        print("X_train:", X_train.shape, "y_train:", y_train.shape)
+        print("X_val  :", X_val.shape, "y_val  :", y_val.shape)
+        print("X_test :", X_test.shape, "y_test :", y_test.shape)
 
-    X_train_seq, y_train_seq = create_sequences(X_train, y_train, LOOKBACK, HORIZON)
-    X_val_seq, y_val_seq = create_sequences(X_val, y_val, LOOKBACK, HORIZON)
-    X_test_seq, y_test_seq = create_sequences(X_test, y_test, LOOKBACK, HORIZON)
+    X_train_seq, y_train_seq, train_times = create_sequences(
+        X_train,
+        y_train,
+        time_index=train_df.index,
+        lookback=cfg.lookback,
+        horizon=cfg.horizon,
+    )
 
-    print("Sequence shapes:")
-    print("Train:", X_train_seq.shape, y_train_seq.shape)
-    print("Val  :", X_val_seq.shape, y_val_seq.shape)
-    print("Test :", X_test_seq.shape, y_test_seq.shape)
+    X_val_full = preprocessor.transform(val_processed_full, target=cfg.target)
+    y_val_full = target_transformer.transform(val_processed_full[[cfg.target]].values)
+    X_val_seq, y_val_seq, val_times = create_sequences(
+        X_val_full,
+        y_val_full,
+        time_index=val_processed_full.index,
+        lookback=cfg.lookback,
+        horizon=cfg.horizon,
+    )
+    X_val_seq, y_val_seq, val_times = _filter_sequences_by_time(
+        X_val_seq,
+        y_val_seq,
+        val_times,
+        start=cfg.val_start,
+        end=cfg.val_end,
+    )
+
+    X_test_full = (
+        preprocessor.transform(test_processed_full, target=cfg.target)
+        if not test_processed_full.empty
+        else np.empty((0, X_train.shape[1]), dtype=np.float32)
+    )
+    y_test_full = (
+        target_transformer.transform(test_processed_full[[cfg.target]].values)
+        if not test_processed_full.empty
+        else np.empty((0, 1))
+    )
+    X_test_seq, y_test_seq, test_times = create_sequences(
+        X_test_full,
+        y_test_full,
+        time_index=test_processed_full.index if not test_processed_full.empty else pd.Index([]),
+        lookback=cfg.lookback,
+        horizon=cfg.horizon,
+    )
+    X_test_seq, y_test_seq, test_times = _filter_sequences_by_time(
+        X_test_seq,
+        y_test_seq,
+        test_times,
+        start=cfg.test_start,
+    )
+
+    if verbose:
+        print("Sequence shapes:")
+        print("Train:", X_train_seq.shape, y_train_seq.shape)
+        print("Val  :", X_val_seq.shape, y_val_seq.shape)
+        print("Test :", X_test_seq.shape, y_test_seq.shape)
 
     if len(X_train_seq) == 0:
-        raise ValueError("Không tạo được sequence cho train. Kiểm tra LOOKBACK/HORIZON hoặc dữ liệu.")
+        raise ValueError("Không tạo được sequence cho train. Kiểm tra lookback/horizon hoặc dữ liệu.")
     if len(X_val_seq) == 0:
-        raise ValueError("Không tạo được sequence cho val. Kiểm tra LOOKBACK/HORIZON hoặc dữ liệu.")
+        raise ValueError("Không tạo được sequence cho val. Kiểm tra lookback/horizon hoặc dữ liệu.")
 
     n_features = X_train_seq.shape[2]
-    print("n_features =", n_features)
+    if verbose:
+        print("n_features =", n_features)
 
     return {
+        "cfg": cfg,
         "df": df,
         "train_df": train_df,
         "val_df": val_df,
         "test_df": test_df,
+        "X_train": X_train,
+        "y_train": y_train,
+        "X_val": X_val,
+        "y_val": y_val,
+        "X_test": X_test,
+        "y_test": y_test,
         "X_train_seq": X_train_seq,
         "y_train_seq": y_train_seq,
         "X_val_seq": X_val_seq,
         "y_val_seq": y_val_seq,
         "X_test_seq": X_test_seq,
         "y_test_seq": y_test_seq,
-        "scaler_y": scaler_y,
-        "inverse_target_func": inverse_target_func,
-        "preprocess": preprocess,
+        "train_times": train_times,
+        "val_times": val_times,
+        "test_times": test_times,
+        "target_transformer": target_transformer,
+        "preprocessor": preprocessor,
         "n_features": n_features,
     }
+
+
+def prepare_dataset(cfg: DataConfig):
+    df = load_and_clean_data(
+        path=cfg.data_path,
+        time_col=cfg.time_col,
+        target=cfg.target,
+        freq=cfg.freq,
+    )
+    print("Loaded df:", df.shape)
+
+    raw_train_df, raw_val_df, raw_test_df = split_data(df, cfg)
+    return _prepare_dataset_from_raw_splits(
+        raw_train_df=raw_train_df,
+        raw_val_df=raw_val_df,
+        raw_test_df=raw_test_df,
+        cfg=cfg,
+        verbose=True,
+    )
+
+
+def prepare_walk_forward_datasets(
+    cfg: DataConfig,
+    eval_size: Optional[int] = None,
+    step_size: Optional[int] = None,
+    max_folds: Optional[int] = None,
+    expanding: bool = True,
+    train_size: Optional[int] = None,
+):
+    df = load_and_clean_data(
+        path=cfg.data_path,
+        time_col=cfg.time_col,
+        target=cfg.target,
+        freq=cfg.freq,
+    )
+    print("Loaded df:", df.shape)
+
+    raw_train_df, raw_val_df, raw_test_df = split_data(df, cfg)
+    eval_pool = pd.concat([raw_val_df, raw_test_df], axis=0)
+    if eval_pool.empty:
+        raise ValueError("Không có dữ liệu tương lai để chạy walk-forward.")
+
+    if eval_size is None:
+        eval_size = len(raw_val_df)
+    if step_size is None:
+        step_size = eval_size
+
+    if eval_size <= 0:
+        raise ValueError("eval_size phải > 0.")
+    if step_size <= 0:
+        raise ValueError("step_size phải > 0.")
+    if max_folds is not None and max_folds <= 0:
+        raise ValueError("max_folds phải > 0 nếu được truyền.")
+
+    base_train_size = len(raw_train_df) if train_size is None else train_size
+    min_train_rows = 72 + cfg.lookback + cfg.horizon
+    if not expanding and base_train_size <= 0:
+        raise ValueError("train_size phải > 0 khi expanding=False.")
+    if not expanding and base_train_size < min_train_rows:
+        raise ValueError(
+            f"train_size phải >= {min_train_rows} để đủ lag/lookback/horizon cho walk-forward."
+        )
+
+    freq_offset = pd.tseries.frequencies.to_offset(cfg.freq)
+    empty_future_df = raw_train_df.iloc[0:0].copy()
+    folds = []
+
+    fold_idx = 0
+    start_idx = 0
+    while start_idx < len(eval_pool):
+        if max_folds is not None and fold_idx >= max_folds:
+            break
+
+        end_idx = min(start_idx + eval_size, len(eval_pool))
+        current_val_raw = eval_pool.iloc[start_idx:end_idx].copy()
+        if len(current_val_raw) < cfg.horizon:
+            break
+
+        history_before_fold = pd.concat([raw_train_df, eval_pool.iloc[:start_idx]], axis=0)
+        if expanding:
+            current_train_raw = history_before_fold
+        else:
+            current_train_raw = history_before_fold.tail(base_train_size)
+        if len(current_train_raw) < min_train_rows:
+            raise ValueError(
+                f"Fold {fold_idx + 1} không đủ lịch sử train. Cần ít nhất {min_train_rows} dòng raw."
+            )
+
+        fold_val_start = current_val_raw.index.min()
+        fold_val_end = current_val_raw.index.max()
+        fold_test_start = fold_val_end + freq_offset
+        fold_cfg = replace(
+            cfg,
+            train_end=str(current_train_raw.index.max()),
+            val_start=str(fold_val_start),
+            val_end=str(fold_val_end),
+            test_start=str(fold_test_start),
+        )
+
+        artifacts = _prepare_dataset_from_raw_splits(
+            raw_train_df=current_train_raw,
+            raw_val_df=current_val_raw,
+            raw_test_df=empty_future_df,
+            cfg=fold_cfg,
+            verbose=False,
+        )
+        artifacts["fold"] = fold_idx + 1
+        artifacts["walk_forward"] = {
+            "fold": fold_idx + 1,
+            "expanding": expanding,
+            "eval_size": len(current_val_raw),
+            "step_size": step_size,
+            "train_size": len(current_train_raw),
+            "train_end": current_train_raw.index.max(),
+            "val_start": fold_val_start,
+            "val_end": fold_val_end,
+        }
+        folds.append(artifacts)
+
+        print(
+            f"Walk-forward fold {fold_idx + 1}: "
+            f"train_end={current_train_raw.index.max()} "
+            f"val=({fold_val_start} -> {fold_val_end}) "
+            f"seq={artifacts['X_val_seq'].shape[0]}"
+        )
+
+        fold_idx += 1
+        start_idx += step_size
+
+    if not folds:
+        raise ValueError("Không tạo được fold walk-forward nào.")
+
+    return folds
+
+
+# =========================
+# OPTIONAL: HELPER FOR MODEL PREDICTION
+# =========================
+def predict_and_inverse(model, X_seq: np.ndarray, target_transformer: TargetTransformer) -> np.ndarray:
+    y_pred_scaled = model.predict(X_seq, verbose=0)
+    return target_transformer.inverse_transform(y_pred_scaled)
+
+
+def inverse_y(y_scaled: np.ndarray, target_transformer: TargetTransformer) -> np.ndarray:
+    return target_transformer.inverse_transform(y_scaled)
+
+
+# =========================
+# MAIN
+# =========================
+def main():
+    set_seed(CFG.seed)
+    artifacts = prepare_dataset(CFG)
+    return artifacts
 
 
 if __name__ == "__main__":
