@@ -1,6 +1,6 @@
 {
-  "model_name": "Seq2Seq LSTM + Attention",
-  "bundle_key": "seq2seq_lstm_attention",
+  "model_name": "CNN-GRU + Attention",
+  "bundle_key": "cnn_gru_attention",
   "lookback": 112,
   "chunk_horizon": 1,
   "rollout_horizon": 24,
@@ -44,7 +44,16 @@
     "month_cos",
     "IsHoliday"
   ],
-  "best_epoch": 10,
-  "final_epochs": 14,
-  "peak_threshold": 1.29542875289917
+  "best_epoch": 44,
+  "final_epochs": 60,
+  "peak_threshold": 1.29542875289917,
+  "step_hours": 3,
+  "target_mode": "log1p",
+  "retrained_on_full_data": true,
+  "retrained_at_utc": "2026-04-13T15:00:19.211850+00:00",
+  "n_full_training_rows": 11529,
+  "n_full_training_sequences": 11417,
+  "train_data_start": "2022-01-20 06:00:00",
+  "train_data_end": "2025-12-31 21:00:00",
+  "dry_run": false
 }

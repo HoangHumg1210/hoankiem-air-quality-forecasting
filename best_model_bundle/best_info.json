@@ -1,16 +1,9 @@
 {
-  "winner_model": "Seq2Seq LSTM + Attention",
-  "source_bundle": "seq2seq_lstm_attention",
-  "registry_root": "/content/model_registry",
-  "ranking_row": {
-    "model": "Seq2Seq LSTM + Attention",
-    "val_mae": 7.514795685596807,
-    "val_rmse": 9.742400669008646,
-    "val_mape": 24.45029567508835,
-    "val_peak_mae": 14.45170553132194,
-    "test_mae": 5.708628156928766,
-    "test_rmse": 9.909684705087033,
-    "test_mape": 24.134460429985207,
-    "test_peak_mae": 17.40885245337684
-  }
+  "retrained_on_full_data": true,
+  "retrained_at_utc": "2026-04-13T15:00:19.211850+00:00",
+  "full_training_rows": 11529,
+  "full_training_sequences": 11417,
+  "best_epoch": 44,
+  "final_epochs": 60,
+  "dry_run": false
 }

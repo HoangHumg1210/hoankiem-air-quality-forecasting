@@ -1,6 +1,6 @@
 {
-  "model_name": "Encoder-only Transformer",
-  "bundle_key": "encoder_only_transformer",
+  "model_name": "Seq2Seq TCN + Calendar Decoder",
+  "bundle_key": "seq2seq_tcn_calendar_decoder",
   "lookback": 112,
   "chunk_horizon": 1,
   "rollout_horizon": 24,
@@ -44,7 +44,7 @@
     "month_cos",
     "IsHoliday"
   ],
-  "best_epoch": 4,
-  "final_epochs": 10,
+  "best_epoch": 30,
+  "final_epochs": 33,
   "peak_threshold": 1.29542875289917
 }

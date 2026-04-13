@@ -1,6 +1,6 @@
 {
-  "model_name": "Seq2Seq TCN",
-  "bundle_key": "seq2seq_tcn",
+  "model_name": "Direct Transformer + Calendar Decoder",
+  "bundle_key": "direct_transformer_calendar_decoder",
   "lookback": 112,
   "chunk_horizon": 1,
   "rollout_horizon": 24,
@@ -44,7 +44,7 @@
     "month_cos",
     "IsHoliday"
   ],
-  "best_epoch": 1,
-  "final_epochs": 10,
+  "best_epoch": 9,
+  "final_epochs": 13,
   "peak_threshold": 1.29542875289917
 }
