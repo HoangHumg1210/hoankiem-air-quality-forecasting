@@ -1,9 +1,9 @@
 {
   "retrained_on_full_data": true,
-  "retrained_at_utc": "2026-04-13T15:00:19.211850+00:00",
+  "retrained_at_utc": "2026-04-13T16:51:06.483557+00:00",
   "full_training_rows": 11529,
   "full_training_sequences": 11417,
-  "best_epoch": 44,
-  "final_epochs": 60,
+  "best_epoch": 31,
+  "final_epochs": 42,
   "dry_run": false
 }

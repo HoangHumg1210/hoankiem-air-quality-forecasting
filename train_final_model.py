@@ -930,7 +930,8 @@ def set_global_seed(seed: int) -> None:
 def main() -> None:
     args    = parse_args()
     app_dir = args.app_dir.resolve()
-    raw_data_path = app_dir / "data" / "processed" / "data2225_done.csv"
+    # raw_data_path = app_dir / "data" / "processed" / "data2225_done.csv"
+    raw_data_path = app_dir / "data2225_done.csv"
     bundle_dir    = app_dir / "best_model_bundle"
 
     logger.info("═" * 55)

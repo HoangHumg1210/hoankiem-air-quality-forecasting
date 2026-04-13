@@ -18,20 +18,80 @@ RAW_DATA_PATH = APP_DIR / "data" / "processed" / "data2225_done.csv"
 FUTURE_LOOKBACK_DAYS = 14
 
 
-def band_info(value: float) -> tuple[str, str, str]:
-    if value <= 15:
-        return "Tốt", "#3B6D11", "#EAF3DE"
-    if value <= 35:
-        return "Trung bình", "#854F0B", "#FAEEDA"
-    if value <= 55:
-        return "Nhạy cảm", "#633806", "#FAC775"
-    if value <= 75:
-        return "Không tốt", "#A32D2D", "#FCEBEB"
-    return "Rất xấu", "#993C1D", "#FAECE7"
+#  Quy đổi PM2.5 sang AQI
+AQI_BREAKPOINTS = [
+    (0.0, 12.0, 0, 50),
+    (12.1, 35.4, 51, 100),
+    (35.5, 55.4, 101, 150),
+    (55.5, 150.4, 151, 200),
+    (150.5, 250.4, 201, 300),
+    (250.5, 500.0, 301, 500),
+]
+
+AQI_LEVELS = [
+    {"range": (0, 50), "label": "Tốt", "color": "#66cc66"},
+    {"range": (51, 100), "label": "Trung bình", "color": "#eec900"},
+    {"range": (101, 150), "label": "Không tốt cho nhóm nhạy cảm", "color": "#FF7F24"},
+    {"range": (151, 200), "label": "Xấu", "color": "#CD2626"},
+    {"range": (201, 300), "label": "Rất Xấu", "color": "#CD2626"},
+    {"range": (301, 500), "label": "Nguy hiểm", "color": "#b03060"},
+]
+#  Quy đổi PM2.5 sang AQI
+AQI_BREAKPOINTS = [
+    (0.0, 12.0, 0, 50),
+    (12.1, 35.4, 51, 100),
+    (35.5, 55.4, 101, 150),
+    (55.5, 150.4, 151, 200),
+    (150.5, 250.4, 201, 300),
+    (250.5, 500.0, 301, 500),
+]
+
+AQI_LEVELS = [
+    {"range": (0, 50), "label": "Tốt", "color": "#66cc66"},
+    {"range": (51, 100), "label": "Trung bình", "color": "#eec900"},
+    {"range": (101, 150), "label": "Không tốt cho nhóm nhạy cảm", "color": "#FF7F24"},
+    {"range": (151, 200), "label": "Xấu", "color": "#CD2626"},
+    {"range": (201, 300), "label": "Rất Xấu", "color": "#CD2626"},
+    {"range": (301, 500), "label": "Nguy hiểm", "color": "#b03060"},
+]
+
+# AQI config clean override for UI/runtime.
+AQI_BREAKPOINTS = [
+    (0.0, 12.0, 0, 50),
+    (12.1, 35.4, 51, 100),
+    (35.5, 55.4, 101, 150),
+    (55.5, 150.4, 151, 200),
+    (150.5, 250.4, 201, 300),
+    (250.5, 500.0, 301, 500),
+]
+
+AQI_LEVELS = [
+    {"range": (0, 50), "label": "Tốt", "color": "#19f019"},
+    {"range": (51, 100), "label": "Trung bình", "color": "#f5d313"},
+    {"range": (101, 150), "label": "Không tốt cho nhóm nhạy cảm", "color": "#F36D0E"},
+    {"range": (151, 200), "label": "Xấu", "color": "#F70303"},
+    {"range": (201, 300), "label": "Rất Xấu", "color": "#8D2544"},
+    {"range": (301, 500), "label": "Nguy hiểm", "color": "#6B0320"},
+]
 
 
 def aqi_from_pm25(value: float) -> int:
-    return int(round(max(value, 0.0) * 2.12))
+    pm25 = float(np.clip(value, 0.0, AQI_BREAKPOINTS[-1][1]))
+    for c_low, c_high, aqi_low, aqi_high in AQI_BREAKPOINTS:
+        if c_low <= pm25 <= c_high:
+            ratio = (pm25 - c_low) / (c_high - c_low) if c_high > c_low else 0.0
+            return int(round(aqi_low + ratio * (aqi_high - aqi_low)))
+    return AQI_BREAKPOINTS[-1][3]
+
+
+def band_info(value: float) -> tuple[str, str, str]:
+    aqi_value = aqi_from_pm25(value)
+    for level in AQI_LEVELS:
+        low, high = level["range"]
+        if low <= aqi_value <= high:
+            color = str(level["color"])
+            return str(level["label"]), color, f"{color}22"
+    return "Nguy hiem", "#7E0023", "#7E002322"
 
 
 def load_registry_metrics() -> pd.DataFrame:
@@ -292,7 +352,7 @@ def make_mae_chart(metrics_df: pd.DataFrame, selected_model: str) -> go.Figure:
 
 
 def make_backtest_chart(timeline_df: pd.DataFrame, selected_model: str) -> go.Figure:
-    plot_df = timeline_df.tail(min(48, len(timeline_df))).copy()
+    plot_df = timeline_df.sort_values("timestamp").copy()
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -408,10 +468,35 @@ def apply_theme() -> None:
         .panel-title { font-size: 16px; font-weight: 700; color: #1c2e4a; margin-bottom: 0.85rem; }
         .legend-row { display: flex; gap: 14px; flex-wrap: wrap; color: #68778f; font-size: 12px; margin-bottom: 0.65rem; }
         .legend-dot { width: 18px; height: 3px; border-radius: 999px; display: inline-block; margin-right: 5px; vertical-align: middle; }
-        .hour-chip { background: #f4f6fb; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; padding: 10px 4px; text-align: center; }
-        .hour-time { font-size: 11px; color: #9aaabf; margin-bottom: 4px; }
-        .hour-value { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
-        .hour-badge { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+        .forecast-toolbar-note { text-align:center; color:#68778f; font-size:12px; padding-top:8px; }
+        .hour-chip {
+            background: #f4f6fb;
+            border: 1px solid rgba(0,0,0,0.08);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+            min-height: 168px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .hour-time { font-size: 11px; color: #9aaabf; line-height: 1.45; min-height: 34px; }
+        .hour-value { font-size: 18px; font-weight: 700; line-height: 1.15; }
+        .hour-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.35;
+            min-height: 42px;
+            width: 100%;
+            max-width: 100%;
+        }
+        .table-wrap { margin-top: 14px; overflow-x: auto; }
         .table-wrap table, .compare-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .table-wrap th, .compare-wrap th { text-align: left; padding: 8px 10px; color: #68778f; font-size: 12px; border-bottom: 1px solid rgba(0,0,0,0.08); }
         .table-wrap td, .compare-wrap td { padding: 8px 10px; border-bottom: 1px solid rgba(0,0,0,0.06); color: #1c2e4a; }
@@ -448,7 +533,7 @@ def apply_theme() -> None:
 
 
 def render_app() -> None:
-    st.set_page_config(page_title="PM2.5 Forecast Dashboard", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="Dự báo chất lượng không khí", layout="wide", initial_sidebar_state="expanded")
     apply_theme()
 
     metrics_df = load_registry_metrics()
@@ -469,7 +554,7 @@ def render_app() -> None:
         unsafe_allow_html=True,
     )
 
-    page = st.sidebar.radio("Điều hướng", ["Trang chủ", "Chất lượng mô hình"], label_visibility="collapsed")
+    page = st.sidebar.radio("Điều hướng", ["Dự báo ", "Chất lượng mô hình"], label_visibility="collapsed")
     default_index = model_options.index(best_row["Model"])
     selected_model = st.sidebar.selectbox("Chọn mô hình", model_options, index=default_index)
     horizon_steps = st.sidebar.slider("Số bước dự báo (mỗi bước 3 giờ, tối đa 72h)", 4, 24, 24, step=4)
@@ -501,10 +586,10 @@ def render_app() -> None:
     quality_label, _, _ = band_info(future_val)
     peak_row = forecast_df.loc[forecast_df["y_pred"].idxmax()]
 
-    title = "Hệ thống dự báo PM2.5" if page == "Trang chủ" else "Đánh giá chất lượng mô hình"
+    title = "Hệ thống dự báo PM2.5" if page == "Dự báo " else "Đánh giá chất lượng mô hình"
     subtitle = (
         f"Dữ liệu thật từ bundle {selected_row['Bundle Key']} · horizon {len(forecast_df)} bước · mỗi bước {step_hours} giờ"
-        if page == "Trang chủ"
+        if page == "Dự báo "
         else "So sánh metrics và backtest giữa các bundle model trong project"
     )
 
@@ -525,7 +610,7 @@ def render_app() -> None:
         unsafe_allow_html=True,
     )
 
-    if page == "Trang chủ":
+    if page == "Dự báo ":
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             now_label, _, _ = band_info(current_val)
@@ -565,50 +650,119 @@ def render_app() -> None:
         st.markdown("</div>", unsafe_allow_html=True)
 
         left, right = st.columns([2.2, 1], gap="large")
+        
         with left:
-            st.markdown('<div class="panel"><div class="panel-title">Các bước dự báo sắp tới</div>', unsafe_allow_html=True)
-            chip_cols = st.columns(min(8, len(forecast_df)))
-            for idx, (_, row) in enumerate(forecast_df.head(8).iterrows()):
-                with chip_cols[idx]:
-                    chip_card(row[DEFAULT_TIMESTAMP_COL].strftime("%d/%m %H:%M"), float(row["y_pred"]))
+            st.markdown('<div class="panel">', unsafe_allow_html=True)
 
-            table_df = forecast_df.head(8).copy()
-            table_df["Thời gian"] = table_df[DEFAULT_TIMESTAMP_COL].dt.strftime("%d/%m %H:%M")
-            table_df["PM2.5 dự báo"] = table_df["y_pred"].round(1)
-            table_df["Thay đổi"] = table_df["y_pred"].apply(
-                lambda value: f"{value - current_val:+.1f} ({((value - current_val) / current_val) * 100:+.1f}%)"
-                if current_val
-                else "0.0 (0.0%)"
-            )
-            rows = ""
-            for _, row in table_df.iterrows():
-                label, color, bg = band_info(float(row["PM2.5 dự báo"]))
-                rows += f"""
-                <tr>
-                    <td>{row['Thời gian']}</td>
-                    <td>{row['PM2.5 dự báo']:.1f}</td>
-                    <td style="color:#3B6D11">{row['Thay đổi']}</td>
-                    <td><span class="soft-badge" style="background:{bg}; color:{color}">{label}</span></td>
-                </tr>
-                """
-            st.markdown(
-                f"""
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Thời gian</th>
-                                <th>PM2.5 dự báo</th>
-                                <th>Thay đổi</th>
-                                <th>Mức chất lượng</th>
-                            </tr>
-                        </thead>
-                        <tbody>{rows}</tbody>
-                    </table>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            # ===== State cho slider trái/phải =====
+            page_size = 8
+            total_items = len(forecast_df)
+
+            if "forecast_start_idx" not in st.session_state:
+                st.session_state.forecast_start_idx = 0
+
+            max_start = max(0, total_items - page_size)
+            start_idx = st.session_state.forecast_start_idx
+            end_idx = min(start_idx + page_size, total_items)
+
+            # ===== Header + counter + nút xem chi tiết =====
+            header_left, header_mid, header_right = st.columns([3.8, 2.0, 1.3])
+            with header_left:
+                st.markdown('<div class="panel-title">Dự báo PM2.5 theo giờ</div>', unsafe_allow_html=True)
+            with header_mid:
+                st.markdown(
+                    f"""
+                    <div class="forecast-toolbar-note">
+                        Hiển thị {start_idx + 1}–{end_idx} / {total_items} mốc dự báo
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with header_right:
+                if "show_forecast_detail" not in st.session_state:
+                    st.session_state.show_forecast_detail = False
+
+                if st.button(
+                    "Xem chi tiết" if not st.session_state.show_forecast_detail else "Ẩn chi tiết",
+                    key="toggle_forecast_detail",
+                    use_container_width=True,
+                ):
+                    st.session_state.show_forecast_detail = not st.session_state.show_forecast_detail
+
+            nav1, nav2, nav3 = st.columns([1, 6, 1])
+
+            with nav1:
+                if st.button("◀", key="forecast_prev", use_container_width=True, disabled=st.session_state.forecast_start_idx == 0):
+                    st.session_state.forecast_start_idx = max(0, st.session_state.forecast_start_idx - page_size)
+
+            with nav3:
+                if st.button("▶", key="forecast_next", use_container_width=True, disabled=st.session_state.forecast_start_idx >= max_start):
+                    st.session_state.forecast_start_idx = min(max_start, st.session_state.forecast_start_idx + page_size)
+
+            with nav2:
+                st.empty()
+
+            start_idx = st.session_state.forecast_start_idx
+            end_idx = min(start_idx + page_size, total_items)
+            visible_df = forecast_df.iloc[start_idx:end_idx].copy()
+
+            # ===== Dãy chip forecast =====
+            chip_cols = st.columns(page_size)
+            for idx in range(page_size):
+                with chip_cols[idx]:
+                    if idx < len(visible_df):
+                        row = visible_df.iloc[idx]
+                        chip_card(row[DEFAULT_TIMESTAMP_COL].strftime("%d/%m/%Y-%H:%M"), float(row["y_pred"]))
+                    else:
+                        st.empty()
+
+            # ===== Chi tiết bảng =====
+            if st.session_state.show_forecast_detail:
+                table_df = visible_df.copy()
+                table_df["Thời gian"] = table_df[DEFAULT_TIMESTAMP_COL].dt.strftime("%d/%m/%Y-%H:%M")
+                table_df["PM2.5 dự báo"] = table_df["y_pred"].round(1)
+                table_df["Thay đổi"] = table_df["y_pred"].apply(
+                    lambda value: f"{value - current_val:+.1f} ({((value - current_val) / current_val) * 100:+.1f}%)"
+                    if current_val else "0.0 (0.0%)"
+                )
+                table_df['AQI'] = table_df['PM2.5 dự báo'].apply(aqi_from_pm25)
+
+                rows = ""
+                for _, row in table_df.iterrows():
+                    label, color, bg = band_info(float(row["PM2.5 dự báo"]))
+                    delta_val = float(row["PM2.5 dự báo"]) - current_val
+                    delta_color = "#3B6D11" if delta_val >= 0 else "#A32D2D"
+
+                    rows += f"""
+                    <tr>
+                        <td>{row['Thời gian']}</td>
+                        <td>{row['PM2.5 dự báo']:.1f}</td>
+                        <td style="color:{delta_color}">{row['Thay đổi']}</td>
+                        <td>{int(row['AQI'])}</td>
+                        <td><span class="soft-badge" style="background:{bg}; color:{color}">{label}</span></td>
+                    </tr>
+                    """
+
+                st.markdown(
+                    f"""
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Thời gian</th>
+                                    <th>PM2.5 dự báo (µg/m³)</th>
+                                    <th>Thay đổi</th>
+                                    <th>AQI</th>
+                                    <th>Mức chất lượng</th>
+                                </tr>
+                            </thead>
+                            <tbody>{rows}</tbody>
+                        </table>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
             st.markdown("</div>", unsafe_allow_html=True)
 
         with right:
@@ -706,7 +860,24 @@ def render_app() -> None:
             if timeline_df.empty:
                 st.info("Bundle này chưa có test_timeline.csv để vẽ backtest.")
             else:
-                st.plotly_chart(make_backtest_chart(timeline_df, selected_model), use_container_width=True)
+                timeline_options = timeline_df["timestamp"].dropna().sort_values().drop_duplicates().tolist()
+                default_start_idx = max(0, len(timeline_options) - min(48, len(timeline_options)))
+                selected_start, selected_end = st.select_slider(
+                    "Chọn khoảng thời gian backtest",
+                    options=timeline_options,
+                    value=(timeline_options[default_start_idx], timeline_options[-1]),
+                    format_func=lambda ts: ts.strftime("%d/%m/%Y %H:%M"),
+                    key=f"backtest_range_{selected_model}",
+                )
+                filtered_timeline_df = timeline_df[
+                    (timeline_df["timestamp"] >= selected_start)
+                    & (timeline_df["timestamp"] <= selected_end)
+                ].copy()
+                st.caption(
+                    f"Hiển thị {len(filtered_timeline_df)} mốc từ "
+                    f"{selected_start.strftime('%d/%m/%Y %H:%M')} đến {selected_end.strftime('%d/%m/%Y %H:%M')}."
+                )
+                st.plotly_chart(make_backtest_chart(filtered_timeline_df, selected_model), use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
         with lower_right:
@@ -723,10 +894,7 @@ def render_app() -> None:
                 unsafe_allow_html=True,
             )
 
-    st.caption(
-        "Dashboard đang đọc metrics từ registry và forecast 72h sau điểm cuối dữ liệu bằng bundle đã chọn. "
-        "Nếu bundle không chạy được suy luận, app sẽ tự fallback sang test_timeline.csv đã lưu."
-    )
+    
 
 
 if __name__ == "__main__":
