@@ -94,6 +94,8 @@ def load_registry_metrics(
             or config.get("bundle_key")
             or bundle_dir.name
         )
+        data_start = best_info.get("train_data_start") or config.get("train_data_start")
+        data_end = best_info.get("train_data_end") or config.get("train_data_end")
 
         rows.append(
             {
@@ -105,6 +107,8 @@ def load_registry_metrics(
                 "RMSE": metrics.get("rmse"),
                 "MAPE": metrics.get("mape"),
                 "Peak MAE": metrics.get("peak_mae"),
+                "Data Start": data_start,
+                "Data End": data_end,
                 "Has Timeline": (bundle_dir / "test_timeline.csv").exists(),
                 "Source": source_name,
                 "Source Rank": 1 if source_name == "model_registry" else 2,

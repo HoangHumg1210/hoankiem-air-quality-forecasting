@@ -916,7 +916,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def set_global_seed(seed: int) -> None:
-    """Set seed cho random, numpy, tensorflow trước khi bất kỳ op nào được tạo."""
     random.seed(seed)
     np.random.seed(seed)
     import tensorflow as tf
