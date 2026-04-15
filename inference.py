@@ -61,6 +61,23 @@ class LoadedBundle:
         return int(self.config.get("step_hours", DEFAULT_STEP_HOURS))
 
     @property
+    def decoder_future_cols(self) -> list[str]:
+        cols = self.config.get("decoder_future_cols", [])
+        if cols is None:
+            return []
+        return list(cols)
+
+    @property
+    def decoder_input_dim(self) -> int:
+        if not getattr(self.model, "inputs", None) or len(self.model.inputs) < 2:
+            return 1
+
+        decoder_shape = getattr(self.model.inputs[1], "shape", None)
+        if decoder_shape is None or decoder_shape[-1] is None:
+            return 1
+        return int(decoder_shape[-1])
+
+    @property
     def required_raw_columns(self) -> list[str]:
         required = {"PM25"}
         for col in self.feature_cols:
@@ -191,6 +208,27 @@ def build_history_feature_frame(raw_df: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def build_decoder_future_frame(raw_df: pd.DataFrame) -> pd.DataFrame:
+    frame = raw_df.copy().sort_index()
+
+    frame["hour"] = frame.index.hour
+    frame["dayofweek"] = frame.index.dayofweek
+    frame["month"] = frame.index.month
+    frame["hour_sin"] = np.sin(2 * np.pi * frame["hour"] / 24)
+    frame["hour_cos"] = np.cos(2 * np.pi * frame["hour"] / 24)
+    frame["dow_sin"] = np.sin(2 * np.pi * frame["dayofweek"] / 7)
+    frame["dow_cos"] = np.cos(2 * np.pi * frame["dayofweek"] / 7)
+    frame["month_sin"] = np.sin(2 * np.pi * frame["month"] / 12)
+    frame["month_cos"] = np.cos(2 * np.pi * frame["month"] / 12)
+
+    if "IsHoliday" in frame.columns:
+        frame["IsHoliday"] = frame["IsHoliday"].astype(float)
+    else:
+        frame["IsHoliday"] = 0.0
+
+    return frame
+
+
 def transform_target(
     y_raw: np.ndarray | list[float],
     *,
@@ -273,6 +311,68 @@ def _validate_future_columns(bundle: LoadedBundle, future_df: pd.DataFrame) -> N
         )
 
 
+def scale_decoder_future_features(bundle: LoadedBundle, future_raw_df: pd.DataFrame) -> np.ndarray:
+    decoder_future_cols = list(bundle.decoder_future_cols)
+    if not decoder_future_cols:
+        return np.empty((len(future_raw_df), 0), dtype=np.float32)
+
+    frame = build_decoder_future_frame(future_raw_df)
+    missing_cols = [col for col in decoder_future_cols if col not in frame.columns]
+    if missing_cols:
+        raise ValueError(
+            "Future decoder covariates are missing columns after feature engineering: "
+            + ", ".join(missing_cols)
+        )
+
+    missing_from_feature_cols = [col for col in decoder_future_cols if col not in bundle.feature_cols]
+    if missing_from_feature_cols:
+        raise ValueError(
+            "decoder_future_cols are not present in feature_cols: "
+            + ", ".join(missing_from_feature_cols)
+        )
+
+    idx = [bundle.feature_cols.index(col) for col in decoder_future_cols]
+    values = frame[decoder_future_cols].to_numpy(dtype=np.float32)
+
+    mean = np.asarray(bundle.x_scaler.mean_, dtype=np.float32)[idx]
+    scale = np.asarray(bundle.x_scaler.scale_, dtype=np.float32)[idx]
+    scale = np.where(np.isclose(scale, 0.0), 1.0, scale)
+    return ((values - mean) / scale).astype(np.float32)
+
+
+def make_decoder_input(
+    bundle: LoadedBundle,
+    chunk_future: pd.DataFrame,
+    *,
+    last_target_scaled: float,
+) -> np.ndarray:
+    decoder_input = np.zeros((1, bundle.chunk_horizon, bundle.decoder_input_dim), dtype=np.float32)
+    effective_horizon = min(len(chunk_future), bundle.chunk_horizon)
+
+    if bundle.decoder_future_cols:
+        expected_dim = 1 + len(bundle.decoder_future_cols)
+        if bundle.decoder_input_dim != expected_dim:
+            raise ValueError(
+                "Bundle decoder_input_dim does not match decoder_future_cols: "
+                f"decoder_input_dim={bundle.decoder_input_dim}, expected={expected_dim}"
+            )
+
+        decoder_input[0, :, 0] = float(last_target_scaled)
+        if effective_horizon > 0:
+            decoder_future = scale_decoder_future_features(bundle, chunk_future)
+            decoder_input[0, :effective_horizon, 1:] = decoder_future[:effective_horizon]
+        return decoder_input
+
+    if bundle.decoder_input_dim != 1:
+        raise ValueError(
+            "Bundle expects multi-dimensional decoder input but config.json does not define "
+            "`decoder_future_cols`."
+        )
+
+    decoder_input[0, 0, 0] = float(last_target_scaled)
+    return decoder_input
+
+
 def forecast_recursive(
     bundle: LoadedBundle,
     history_df: pd.DataFrame,
@@ -322,15 +422,23 @@ def forecast_recursive(
             target_mode=bundle.target_mode,
         )
 
-        decoder_input = np.zeros((1, bundle.chunk_horizon, 1), dtype=np.float32)
-        decoder_input[0, 0, 0] = last_target_scaled
-        y_pred_scaled = np.zeros((bundle.chunk_horizon,), dtype=np.float32)
+        decoder_input = make_decoder_input(
+            bundle,
+            chunk_future,
+            last_target_scaled=last_target_scaled,
+        )
 
-        for step_idx in range(effective_chunk_horizon):
-            decoder_forecast = bundle.model.predict([x_input, decoder_input], verbose=0)[0]
-            y_pred_scaled[step_idx] = decoder_forecast[step_idx]
-            if step_idx + 1 < bundle.chunk_horizon:
-                decoder_input[0, step_idx + 1, 0] = y_pred_scaled[step_idx]
+        if bundle.decoder_future_cols:
+            y_pred_scaled = bundle.model.predict([x_input, decoder_input], verbose=0)[0][
+                :effective_chunk_horizon
+            ].astype(np.float32)
+        else:
+            y_pred_scaled = np.zeros((bundle.chunk_horizon,), dtype=np.float32)
+            for step_idx in range(effective_chunk_horizon):
+                decoder_forecast = bundle.model.predict([x_input, decoder_input], verbose=0)[0]
+                y_pred_scaled[step_idx] = decoder_forecast[step_idx]
+                if step_idx + 1 < bundle.chunk_horizon:
+                    decoder_input[0, step_idx + 1, 0] = y_pred_scaled[step_idx]
 
         y_pred = inverse_target(
             y_pred_scaled[:effective_chunk_horizon],
