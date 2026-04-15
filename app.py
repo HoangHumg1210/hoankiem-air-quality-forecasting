@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 from html import escape
 from pathlib import Path
 
@@ -17,6 +18,7 @@ REGISTRY_DIR = APP_DIR / "model_registry"
 BEST_BUNDLE_DIR = APP_DIR / "best_model_bundle"
 RAW_DATA_PATH = APP_DIR / "data" / "processed" / "data2225_done.csv"
 FUTURE_LOOKBACK_DAYS = 14
+DEFAULT_HISTORY_WINDOW = 24
 
 
 # AQI config clean override for UI/runtime.
@@ -113,6 +115,30 @@ def get_selected_chart_point(chart_state, history_df: pd.DataFrame, forecast_df:
     return None
 
 
+def get_selected_model_from_mae_chart(chart_state, metrics_df: pd.DataFrame) -> str | None:
+    selection = _state_get(chart_state, "selection", chart_state)
+    points = _state_get(selection, "points", [])
+    if not points:
+        return None
+
+    point = points[-1]
+    model_name = _state_get(point, "x")
+    if model_name is not None:
+        model_name = str(model_name)
+        if model_name in set(metrics_df["Model"].astype(str)):
+            return model_name
+
+    point_index = _state_get(point, "point_index", _state_get(point, "pointIndex"))
+    if point_index is None:
+        return None
+
+    chart_df = metrics_df.sort_values("MAE", na_position="last").reset_index(drop=True)
+    point_index = int(point_index)
+    if 0 <= point_index < len(chart_df):
+        return str(chart_df.iloc[point_index]["Model"])
+    return None
+
+
 def load_registry_metrics() -> pd.DataFrame:
     return load_bundle_registry_metrics(
         APP_DIR,
@@ -144,6 +170,25 @@ def load_bundle_timeline(bundle_dir: str | Path) -> pd.DataFrame:
 def resolve_bundle_dir(metrics_df: pd.DataFrame, model_name: str) -> Path:
     row = metrics_df.loc[metrics_df["Model"] == model_name].iloc[0]
     return APP_DIR / row["Bundle Dir"]
+
+
+def load_bundle_runtime_limits(bundle_dir: str | Path) -> tuple[int, int]:
+    bundle_path = Path(bundle_dir)
+    if not bundle_path.is_absolute():
+        bundle_path = APP_DIR / bundle_path
+
+    config_path = bundle_path / "config.json"
+    if not config_path.exists():
+        return 24, 3
+
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return 24, 3
+
+    rollout_horizon = max(int(config.get("rollout_horizon", 24)), 1)
+    step_hours = max(int(config.get("step_hours", 3)), 1)
+    return rollout_horizon, step_hours
 
 
 def _coerce_binary_like(value: float, source_series: pd.Series) -> float:
@@ -385,23 +430,33 @@ def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame) -> 
 
 
 def make_mae_chart(metrics_df: pd.DataFrame, selected_model: str) -> go.Figure:
-    colors = ["#378ADD" if model == selected_model else "#B5D4F4" for model in metrics_df["Model"]]
+    chart_df = metrics_df.sort_values("MAE", na_position="last").reset_index(drop=True)
+    colors = ["#67C9A8" if model == selected_model else "#8FB5F9" for model in chart_df["Model"]]
+    text_colors = ["#22A06B" if model == selected_model else "#3F79D8" for model in chart_df["Model"]]
+    y_max = float(chart_df["MAE"].max()) if not chart_df.empty else 1.0
     fig = go.Figure(
         go.Bar(
-            x=metrics_df["Model"],
-            y=metrics_df["MAE"],
-            text=metrics_df["MAE"].round(2),
+            x=chart_df["Model"],
+            y=chart_df["MAE"],
+            text=chart_df["MAE"].round(2),
             textposition="outside",
-            marker=dict(color=colors),
+            cliponaxis=False,
+            marker=dict(color=colors, line=dict(color="rgba(255,255,255,0.6)", width=1)),
+            textfont=dict(color=text_colors, size=15),
+            hovertemplate="<b>%{x}</b><br>MAE: %{y:.2f} µg/m³<extra></extra>",
+            selectedpoints=[idx for idx, model in enumerate(chart_df["Model"]) if model == selected_model],
+            selected=dict(marker=dict(opacity=1.0)),
+            unselected=dict(marker=dict(opacity=0.92)),
         )
     )
     fig.update_layout(
-        height=280,
-        margin=dict(l=8, r=8, t=8, b=8),
+        height=430,
+        margin=dict(l=8, r=8, t=28, b=96),
         paper_bgcolor="white",
         plot_bgcolor="white",
-        xaxis=dict(title=""),
-        yaxis=dict(title="MAE (µg/m³)", gridcolor="rgba(0,0,0,0.05)"),
+        clickmode="event+select",
+        xaxis=dict(title="", tickfont=dict(size=12), tickangle=32, automargin=True),
+        yaxis=dict(title="", gridcolor="rgba(63,121,216,0.12)", range=[0, y_max * 1.18], automargin=True),
     )
     return fig
 
@@ -665,8 +720,31 @@ def apply_theme() -> None:
             line-height: 1.2;
         }
         .metric-footer { font-size: 12px; color: #73819a; font-weight: 700; }
-        .panel { background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
+        .panel {
+            background: #ffffff;
+            border: 1px solid rgba(31, 51, 84, 0.09);
+            border-radius: 18px;
+            padding: 1.1rem 1.2rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 10px 24px rgba(31, 51, 84, 0.06);
+        }
         .panel-title { font-size: 16px; font-weight: 700; color: #1c2e4a; margin-bottom: 0.85rem; }
+        .quality-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 0.9rem; }
+        .quality-title-row .panel-title { margin-bottom: 0; }
+        .quality-title-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #e8f0ff;
+            color: #3f79d8;
+            font-size: 15px;
+            font-weight: 800;
+            flex: 0 0 28px;
+        }
+        .quality-meta { color: #60728d; font-size: 12px; font-weight: 700; margin: 0 0 0.55rem 2px; }
         .legend-row { display: flex; gap: 14px; flex-wrap: wrap; color: #68778f; font-size: 12px; margin-bottom: 0.65rem; }
         .legend-dot { width: 18px; height: 3px; border-radius: 999px; display: inline-block; margin-right: 5px; vertical-align: middle; }
         .forecast-toolbar-note { text-align:center; color:#68778f; font-size:12px; padding-top:8px; }
@@ -698,10 +776,36 @@ def apply_theme() -> None:
             max-width: 100%;
         }
         .table-wrap { margin-top: 14px; overflow-x: auto; }
+        .compare-wrap {
+            overflow-x: auto;
+            background: #f7faff;
+            border: 1px solid #dbe5f2;
+            border-radius: 12px;
+            overflow: hidden;
+        }
         .table-wrap table, .compare-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .table-wrap th, .compare-wrap th { text-align: left; padding: 8px 10px; color: #68778f; font-size: 12px; border-bottom: 1px solid rgba(0,0,0,0.08); }
-        .table-wrap td, .compare-wrap td { padding: 8px 10px; border-bottom: 1px solid rgba(0,0,0,0.06); color: #1c2e4a; }
-        .best-row { background: #ebfaf1; }
+        .table-wrap th, .compare-wrap th {
+            text-align: left;
+            padding: 10px 12px;
+            color: #60728d;
+            font-size: 12px;
+            font-weight: 800;
+            border-bottom: 1px solid rgba(71, 98, 138, 0.16);
+            border-right: 1px solid rgba(71, 98, 138, 0.12);
+            background: #eef4fb;
+        }
+        .table-wrap td, .compare-wrap td {
+            padding: 11px 12px;
+            border-bottom: 1px solid rgba(71, 98, 138, 0.10);
+            border-right: 1px solid rgba(71, 98, 138, 0.10);
+            color: #1c2e4a;
+            background: #ffffff;
+        }
+        .compare-wrap th:last-child, .compare-wrap td:last-child { border-right: none; }
+        .compare-wrap tbody tr:last-child td { border-bottom: none; }
+        .best-row td { background: #e2f4ea; }
+        .focus-row td { background: #eef4ff; }
+        .best-row.focus-row td { background: #d8efe2; }
         .soft-badge { display: inline-block; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
         .warning-box {
             background: linear-gradient(180deg, #fcf2e7 0%, #f9ebd9 100%);
@@ -794,8 +898,17 @@ def render_app() -> None:
     page = st.sidebar.radio("Điều hướng", ["Dự báo ", "Chất lượng mô hình"], label_visibility="collapsed")
     default_index = model_options.index(best_row["Model"])
     selected_model = st.sidebar.selectbox("Chọn mô hình", model_options, index=default_index)
-    horizon_steps = st.sidebar.slider("Số bước dự báo (mỗi bước 3 giờ, tối đa 72h)", 4, 24, 24, step=4)
-    history_window = st.sidebar.selectbox("Số điểm lịch sử hiển thị", [14, 24, 32], index=0)
+    sidebar_bundle_dir = resolve_bundle_dir(metrics_df, selected_model)
+    max_horizon_steps, bundle_step_hours = load_bundle_runtime_limits(sidebar_bundle_dir)
+    default_horizon_steps = min(24, max_horizon_steps)
+    horizon_steps = st.sidebar.slider(
+        f"Số bước dự báo (mỗi bước {bundle_step_hours} giờ, tối đa {max_horizon_steps * bundle_step_hours}h)",
+        1,
+        max_horizon_steps,
+        default_horizon_steps,
+        step=1,
+    )
+    forecast_page_size = st.sidebar.selectbox("Số mốc forecast mỗi trang", [6, 8, 10, 12], index=1)
     st.sidebar.button("Cập nhật dashboard", use_container_width=True)
 
     if page == "Chất lượng mô hình":
@@ -808,14 +921,29 @@ def render_app() -> None:
             unsafe_allow_html=True,
         )
 
-    bundle_dir = resolve_bundle_dir(metrics_df, selected_model)
-    selected_row = metrics_df.loc[metrics_df["Model"] == selected_model].iloc[0]
+    quality_chart_key = "quality_mae_chart"
+    if page == "Chất lượng mô hình":
+        if st.session_state.get("quality_sidebar_model") != selected_model:
+            st.session_state.quality_sidebar_model = selected_model
+            st.session_state.quality_focus_model = selected_model
+
+        clicked_model = get_selected_model_from_mae_chart(st.session_state.get(quality_chart_key), metrics_df)
+        if clicked_model is not None:
+            st.session_state.quality_focus_model = clicked_model
+
+    active_model = (
+        str(st.session_state.get("quality_focus_model", selected_model))
+        if page == "Chất lượng mô hình"
+        else selected_model
+    )
+    bundle_dir = resolve_bundle_dir(metrics_df, active_model)
+    selected_row = metrics_df.loc[metrics_df["Model"] == active_model].iloc[0]
     timeline_df = load_bundle_timeline(bundle_dir)
 
     history_df, forecast_df, step_hours, forecast_source = load_latest_forecast_or_timeline(bundle_dir, horizon_steps)
-    history_df = history_df.tail(history_window).copy()
+    history_df = history_df.tail(DEFAULT_HISTORY_WINDOW).copy()
 
-    chart_key = f"forecast_chart_{selected_model}_{horizon_steps}_{history_window}".replace(" ", "_")
+    chart_key = f"forecast_chart_{active_model}_{horizon_steps}".replace(" ", "_")
     current_val = float(history_df["PM25"].iloc[-1])
     future_val = float(forecast_df["y_pred"].iloc[0])
     delta = future_val - current_val
@@ -868,7 +996,7 @@ def render_app() -> None:
                 <div class="page-subtitle">{subtitle}</div>
             </div>
             <div class="header-pills">
-                <div class="header-pill">Model: <strong>{selected_model}</strong></div>
+                <div class="header-pill">Model: <strong>{active_model}</strong></div>
                 <div class="header-pill">MAE: <strong>{selected_row['MAE']:.2f}</strong></div>
                 <div class="header-pill">Nguồn forecast: <strong>{forecast_source}</strong></div>
             </div>
@@ -943,7 +1071,7 @@ def render_app() -> None:
             st.markdown('<div class="panel">', unsafe_allow_html=True)
 
             # ===== State cho slider trái/phải =====
-            page_size = 8
+            page_size = int(forecast_page_size)
             total_items = len(forecast_df)
 
             if "forecast_start_idx" not in st.session_state:
@@ -1057,74 +1185,100 @@ def render_app() -> None:
             st.markdown(build_warning_html(forecast_df, current_val, step_hours), unsafe_allow_html=True)
 
     else:
+        ranking_df = metrics_df.sort_values("MAE", na_position="last").reset_index(drop=True)
+        current_rank = int(ranking_df.index[ranking_df["Model"] == active_model][0]) + 1
+        rank_badge = "Tốt nhất theo MAE" if active_model == str(best_row["Model"]) else f"Top {current_rank}/{len(ranking_df)}"
         q1, q2, q3, q4 = st.columns(4)
         with q1:
-            metric_card("Model tốt nhất", str(best_row["Model"]), "Theo MAE", "#185FA5", "#E6F1FB")
+            
+            metric_card("Model đang xem", str(active_model), rank_badge, "#1DC54F", "#E6F1FB")
         with q2:
-            metric_card("MAE", f"{selected_row['MAE']:.2f} µg/m³", selected_model, "#0F6E56", "#E1F5EE")
+            metric_card("MAE", f"{selected_row['MAE']:.2f} µg/m³", active_model, "#5391EE", "#E1F5EE")
         with q3:
-            metric_card("RMSE", f"{selected_row['RMSE']:.2f} µg/m³", selected_model, "#534AB7", "#EEEDFE")
+            metric_card("RMSE", f"{selected_row['RMSE']:.2f} µg/m³", active_model, "#534AB7", "#EEEDFE")
         with q4:
             peak_mae = selected_row["Peak MAE"]
             peak_text = f"{peak_mae:.2f}" if pd.notna(peak_mae) else "N/A"
-            metric_card("MAPE / Peak MAE", f"{selected_row['MAPE']:.2f}%", peak_text, "#854F0B", "#FAEEDA")
+            metric_card("MAPE / Peak MAE", f"{selected_row['MAPE']:.2f}%", peak_text, "#EC9E0D", "#FAEEDA")
 
-        left, right = st.columns([1.1, 1], gap="large")
+        left, right = st.columns([1.0, 1.18], gap="large")
         with left:
             rows = ""
-            table_df = metrics_df.sort_values("MAE", na_position="last").reset_index(drop=True)
+            table_df = ranking_df.copy()
             for idx, row in table_df.iterrows():
-                row_class = "best-row" if idx == 0 else ""
-                badge = ' <span class="soft-badge" style="background:#EAF3DE; color:#3B6D11">best</span>' if idx == 0 else ""
+                row_classes: list[str] = []
+                badges: list[str] = []
+                if idx == 0:
+                    row_classes.append("best-row")
+                    badges.append('<span class="soft-badge" style="background:#EAF3DE; color:#1DC54F"> 🏆 Best</span>')
+                if str(row["Model"]) == active_model:
+                    row_classes.append("focus-row")
+                    badges.append('<span class="soft-badge" style="background:#EAF2FF; color:#3F79D8">Đang xem</span>')
+                row_class = " ".join(row_classes)
+                badge = f" {' '.join(badges)}" if badges else ""
                 
                 rows += f"""
                 <tr class="{row_class}">
                     <td><strong>{row['Model']}</strong>{badge}</td>
-                    <td>{row['MAE']:.2f}</td>
                     <td>{row['MSE']:.2f}</td>
+                    <td>{row['MAE']:.2f}</td>
                     <td>{row['RMSE']:.2f}</td>
                     <td>{row['MAPE']:.2f}%</td>
                     <td>{row['Peak MAE']:.2f}</td>
            
                 </tr>
                 """
-            st.markdown('<div class="panel"><div class="panel-title">Bảng metrics các model</div>', unsafe_allow_html=True)
             st.markdown(
                 f"""
-                <div class="compare-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Model</th>
-                                <th>MSE</th>
-                                <th>MAE</th>
-                                <th>RMSE</th>
-                                <th>MAPE</th>
-                                <th>Peak MAE</th>
-                            </tr>
-                        </thead>
-                        <tbody>{rows}</tbody>
-                    </table>
+                <div class="panel">
+                    <div class="quality-title-row">
+                        <div class="quality-title-icon">▦</div>
+                        <div class="panel-title">Bảng so sánh {len(table_df)} mô hình</div>
+                    </div>
+                    <div class="compare-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Model</th>
+                                    <th>MSE</th>
+                                    <th>MAE</th>
+                                    <th>RMSE</th>
+                                    <th>MAPE</th>
+                                    <th>Peak MAE</th>
+                                </tr>
+                            </thead>
+                            <tbody>{rows}</tbody>
+                        </table>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            st.markdown("</div>", unsafe_allow_html=True)
 
         with right:
-            st.markdown(
-                """
-                <div class="panel">
-                    <div class="panel-title">So sánh MAE giữa các model</div>
-                    <div class="legend-row">
-                        <span><span class="legend-dot" style="background:#378ADD"></span>Model đang chọn</span>
-                        <span><span class="legend-dot" style="background:#B5D4F4"></span>Model còn lại</span>
+            with st.container(border=True):
+                st.markdown(
+                    """
+                    <div class="quality-title-row">
+                        <div class="quality-title-icon">✦</div>
+                        <div class="panel-title">So sánh MAE giữa các mô hình</div>
                     </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.plotly_chart(make_mae_chart(metrics_df, selected_model), use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+                    <div class="quality-meta">MAE (µg/m³)</div>
+                    <div class="legend-row">
+                        <span><span class="legend-dot" style="background:#67C9A8"></span>Model đang xem</span>
+                        <span><span class="legend-dot" style="background:#8FB5F9"></span>Model còn lại</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.plotly_chart(
+                    make_mae_chart(metrics_df, active_model),
+                    use_container_width=True,
+                    key=quality_chart_key,
+                    on_select="rerun",
+                    selection_mode="points",
+                    config={"displayModeBar": False},
+                )
 
         lower_left, lower_right = st.columns([2, 1], gap="large")
         with lower_left:
@@ -1139,7 +1293,7 @@ def render_app() -> None:
                     options=timeline_options,
                     value=(timeline_options[default_start_idx], timeline_options[-1]),
                     format_func=lambda ts: ts.strftime("%d/%m/%Y %H:%M"),
-                    key=f"backtest_range_{selected_model}",
+                    key=f"backtest_range_{active_model}",
                 )
                 filtered_timeline_df = timeline_df[
                     (timeline_df["timestamp"] >= selected_start)
@@ -1149,20 +1303,28 @@ def render_app() -> None:
                     f"Hiển thị {len(filtered_timeline_df)} mốc từ "
                     f"{selected_start.strftime('%d/%m/%Y %H:%M')} đến {selected_end.strftime('%d/%m/%Y %H:%M')}."
                 )
-                st.plotly_chart(make_backtest_chart(filtered_timeline_df, selected_model), use_container_width=True)
+                st.plotly_chart(make_backtest_chart(filtered_timeline_df, active_model), use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
         with lower_right:
             peak_text = f"{selected_row['Peak MAE']:.2f}" if pd.notna(selected_row["Peak MAE"]) else "N/A"
             data_start = selected_row["Data Start"] if "Data Start" in selected_row else "N/A"
             data_end = selected_row["Data End"] if "Data End" in selected_row else "N/A"
+            summary_line = (
+                f"<strong>{active_model}</strong> hiện là model tốt nhất theo MAE trong {len(ranking_df)} mô hình."
+                if active_model == str(best_row["Model"])
+                else (
+                    f"<strong>{active_model}</strong> hiện đứng hạng <strong>{current_rank}/{len(ranking_df)}</strong> "
+                    f"theo MAE. Model tốt nhất hiện tại là <strong>{best_row['Model']}</strong>."
+                )
+            )
             st.markdown(
                 f"""
                 <div class="conclusion-box">
                     <div class="conclusion-title">Kết luận</div>
                     <p>Dữ liệu được sử dụng để huấn luyện model là dữ liệu từ {data_start} đến {data_end}.</p>
-                    <p>Model đang chọn là <strong>{selected_model}</strong> với MAE <strong>{selected_row['MAE']:.2f}</strong>, MSE <strong>{selected_row['MSE']:.2f}</strong>, RMSE <strong>{selected_row['RMSE']:.2f}</strong>, Peak MAE <strong>{peak_text}</strong>.</p>
-                    <p><strong>{selected_model}</strong> cho kết quả tốt nhất trong 5 mô hình với khả năng bám sát xu hướng thực tế. Mô hình này được lựa chọn để triển khai trong hệ thống dự báo PM2.5.</p>
+                    <p>Model đang xem là <strong>{active_model}</strong> với MAE <strong>{selected_row['MAE']:.2f}</strong>, MSE <strong>{selected_row['MSE']:.2f}</strong>, RMSE <strong>{selected_row['RMSE']:.2f}</strong>, Peak MAE <strong>{peak_text}</strong>.</p>
+                    <p>{summary_line}</p>
                 </div>
                 """,
                 unsafe_allow_html=True,
