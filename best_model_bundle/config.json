@@ -3,7 +3,7 @@
   "bundle_key": "seq2seq_lstm_attention",
   "lookback": 112,
   "chunk_horizon": 1,
-  "rollout_horizon": 24,
+  "rollout_horizon": 40,
   "target_transform_mode": "log1p",
   "feature_cols": [
     "PM25_lag_1",
@@ -50,7 +50,7 @@
   "step_hours": 3,
   "target_mode": "log1p",
   "retrained_on_full_data": true,
-  "retrained_at_utc": "2026-04-13T16:51:06.483557+00:00",
+  "retrained_at_utc": "2026-04-15T18:17:32.623982+00:00",
   "n_full_training_rows": 11529,
   "n_full_training_sequences": 11417,
   "train_data_start": "2022-01-20 06:00:00",

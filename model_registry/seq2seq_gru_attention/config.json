@@ -3,7 +3,7 @@
   "bundle_key": "seq2seq_gru_attention",
   "lookback": 112,
   "chunk_horizon": 1,
-  "rollout_horizon": 24,
+  "rollout_horizon": 40,
   "target_transform_mode": "log1p",
   "feature_cols": [
     "PM25_lag_1",
@@ -44,7 +44,7 @@
     "month_cos",
     "IsHoliday"
   ],
-  "best_epoch": 9,
-  "final_epochs": 13,
+  "best_epoch": 8,
+  "final_epochs": 11,
   "peak_threshold": 1.29542875289917
 }

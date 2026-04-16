@@ -353,7 +353,7 @@ def make_weighted_huber_loss(
 
 # ===========================================================================
 # PHẦN 5 – PROMOTE
-# Chọn bundle tốt nhất trong model_registry và copy sang best_model_bundle
+# Chọn bundle tốt nhất trong model_registry và copy sang best_model_bundle_1        
 # ===========================================================================
 
 def _read_bundle_info(bundle_dir: Path) -> dict[str, Any]:
@@ -375,10 +375,10 @@ def promote_best_bundle(
     Chọn bundle từ model_registry/:
       - bundle_key được chỉ định → dùng đó
       - Không có → chọn bundle có val_mae / mae nhỏ nhất
-    Copy toàn bộ sang best_model_bundle/.
+    Copy toàn bộ sang best_model_bundle_1/.
     """
     registry_dir = app_dir / "model_registry"
-    dest_dir     = app_dir / "best_model_bundle"
+    dest_dir     = app_dir / "best_model_bundle_1"
 
     if not registry_dir.exists():
         raise FileNotFoundError(
@@ -868,7 +868,7 @@ def parse_args() -> argparse.Namespace:
         "--app-dir",
         default=Path(__file__).resolve().parent,
         type=Path,
-        help="Project root chứa data/, model_registry/, best_model_bundle/.",
+        help="Project root chứa data/, model_registry/, best_model_bundle_1/.",
     )
     p.add_argument(
         "--bundle-key",
@@ -931,7 +931,7 @@ def main() -> None:
     app_dir = args.app_dir.resolve()
     # raw_data_path = app_dir / "data" / "processed" / "data2225_done.csv"
     raw_data_path = app_dir / "data2225_done.csv"
-    bundle_dir    = app_dir / "best_model_bundle"
+    bundle_dir    = app_dir / "best_model_bundle_1"
 
     logger.info("═" * 55)
     logger.info("PM2.5 FORECAST – DEPLOYMENT PREPARATION")

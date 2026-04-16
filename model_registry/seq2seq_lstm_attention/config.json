@@ -3,7 +3,7 @@
   "bundle_key": "seq2seq_lstm_attention",
   "lookback": 112,
   "chunk_horizon": 1,
-  "rollout_horizon": 24,
+  "rollout_horizon": 40,
   "target_transform_mode": "log1p",
   "feature_cols": [
     "PM25_lag_1",
