@@ -353,18 +353,149 @@ def make_weighted_huber_loss(
 
 # ===========================================================================
 # PHẦN 5 – PROMOTE
-# Chọn bundle tốt nhất trong model_registry và copy sang best_model_bundle_1        
+# Chọn bundle tốt nhất trong model_registry và copy sang best_model_bundle       
 # ===========================================================================
 
+def _read_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        logger.warning("%s l?i JSON: %s", path, exc)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _read_bundle_info(bundle_dir: Path) -> dict[str, Any]:
-    for fname in ("best_info.json", "config.json"):
-        p = bundle_dir / fname
-        if p.exists():
-            try:
-                return json.loads(p.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                continue
-    return {}
+    info: dict[str, Any] = {}
+    for fname in ("metrics.json", "best_info.json", "config.json"):
+        info.update(_read_json_file(bundle_dir / fname))
+    return info
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metric_from_info(info: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = _safe_float(info.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _format_metric(value: float | None, digits: int = 4) -> str:
+    if value is None or not np.isfinite(value):
+        return "N/A"
+    return f"{value:.{digits}f}"
+
+
+def summarize_bundle(bundle_dir: Path) -> dict[str, Any]:
+    info = _read_bundle_info(bundle_dir)
+    feature_cols = info.get("feature_cols") or []
+    decoder_future_cols = info.get("decoder_future_cols") or []
+
+    if not isinstance(feature_cols, list):
+        feature_cols = []
+    if not isinstance(decoder_future_cols, list):
+        decoder_future_cols = []
+
+    return {
+        "bundle_key": bundle_dir.name,
+        "bundle_dir": str(bundle_dir),
+        "model_name": info.get("model_name", bundle_dir.name),
+        "mae": _metric_from_info(info, "val_mae", "mae", "test_mae"),
+        "rmse": _metric_from_info(info, "rmse"),
+        "mse": _metric_from_info(info, "mse"),
+        "mape": _metric_from_info(info, "mape"),
+        "peak_mae": _metric_from_info(info, "peak_mae"),
+        "peak_threshold": _metric_from_info(info, "peak_threshold"),
+        "lookback": info.get("lookback"),
+        "chunk_horizon": info.get("chunk_horizon"),
+        "rollout_horizon": info.get("rollout_horizon"),
+        "best_epoch": info.get("best_epoch"),
+        "final_epochs": info.get("final_epochs"),
+        "target_mode": info.get("target_mode") or info.get("target_transform_mode"),
+        "feature_count": len(feature_cols),
+        "decoder_future_count": len(decoder_future_cols),
+    }
+
+
+def collect_bundle_summaries(registry_dir: Path) -> list[dict[str, Any]]:
+    summaries = [summarize_bundle(p) for p in registry_dir.iterdir() if p.is_dir()]
+    return sorted(
+        summaries,
+        key=lambda s: (
+            s["mae"] if s["mae"] is not None else float("inf"),
+            s["bundle_key"],
+        ),
+    )
+
+
+def log_bundle_summary(title: str, summary: dict[str, Any]) -> None:
+    logger.info("%s", title)
+    logger.info("  Bundle key        : %s", summary["bundle_key"])
+    logger.info("  Model             : %s", summary["model_name"])
+    logger.info("  Bundle dir        : %s", summary["bundle_dir"])
+    logger.info(
+        "  Metrics           : MAE=%s | RMSE=%s | MSE=%s | MAPE=%s | Peak_MAE=%s",
+        _format_metric(summary["mae"]),
+        _format_metric(summary["rmse"]),
+        _format_metric(summary["mse"]),
+        _format_metric(summary["mape"]),
+        _format_metric(summary["peak_mae"]),
+    )
+    logger.info(
+        "  Shape             : lookback=%s | chunk_horizon=%s | rollout_horizon=%s",
+        summary["lookback"],
+        summary["chunk_horizon"],
+        summary["rollout_horizon"],
+    )
+    logger.info(
+        "  Features          : %s input features | %s decoder future features",
+        summary["feature_count"],
+        summary["decoder_future_count"],
+    )
+    logger.info(
+        "  Training meta     : best_epoch=%s | final_epochs=%s | target_mode=%s | peak_threshold=%s",
+        summary["best_epoch"],
+        summary["final_epochs"],
+        summary["target_mode"],
+        _format_metric(summary["peak_threshold"]),
+    )
+
+
+def log_registry_ranking(app_dir: Path) -> None:
+    registry_dir = app_dir / "model_registry"
+    if not registry_dir.exists():
+        logger.warning("Khong tim thay model_registry tai %s", registry_dir)
+        return
+
+    summaries = collect_bundle_summaries(registry_dir)
+    if not summaries:
+        logger.warning("model_registry tai %s khong co bundle nao.", registry_dir)
+        return
+
+    logger.info("XEP HANG BUNDLE TRONG model_registry (MAE tang dan)")
+    for idx, summary in enumerate(summaries, start=1):
+        logger.info(
+            "  %d. %s | model=%s | MAE=%s | RMSE=%s | Peak_MAE=%s | best_epoch=%s | final_epochs=%s",
+            idx,
+            summary["bundle_key"],
+            summary["model_name"],
+            _format_metric(summary["mae"]),
+            _format_metric(summary["rmse"]),
+            _format_metric(summary["peak_mae"]),
+            summary["best_epoch"],
+            summary["final_epochs"],
+        )
 
 
 def promote_best_bundle(
@@ -975,6 +1106,7 @@ def main() -> None:
     # Summary
     logger.info("═" * 55)
     logger.info("HOÀN TẤT")
+    logger.info("  Mô hình tốt nhất  ")
     logger.info("  Promoted bundle   : %s", promoted_key)
     logger.info("  Model             : %s", result["model_name"])
     logger.info("  Bundle dir        : %s", result["bundle_dir"])
