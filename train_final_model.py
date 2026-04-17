@@ -778,11 +778,24 @@ def run_final_training(
     # các chiều phụ được pad bằng 0 vì không có future covariates khi retrain.
     decoder_future: np.ndarray | None = None
     if decoder_input_dim > 1:
-        n_extra = decoder_input_dim - 1
-        decoder_future = np.zeros((len(x_scaled), n_extra), dtype=np.float32)
+        decoder_future_cols = [
+            "hour_sin", "hour_cos", "dow_sin", "dow_cos",
+            "month_sin", "month_cos", "IsHoliday",
+        ]
+        decoder_future_idx = [feature_cols.index(c) for c in decoder_future_cols if c in feature_cols]
+        decoder_future = x_scaled[:, decoder_future_idx]
+
+        expected_extra = decoder_input_dim - 1
+        actual_extra = decoder_future.shape[1]
+        if actual_extra != expected_extra:
+            raise ValueError(
+                f"Decoder input dim không khớp: model cần {expected_extra} future cols, "
+                f"nhưng chỉ tạo được {actual_extra} từ feature_cols."
+            )
+
         logger.info(
-            "decoder_input_dim=%d > 1 → pad %d chiều phụ = 0",
-            decoder_input_dim, n_extra,
+            "decoder_input_dim=%d > 1 -> dùng %d decoder future covariates",
+            decoder_input_dim, actual_extra,
         )
 
     x_seq, dec_seq, y_seq = make_sequences(
@@ -1125,3 +1138,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+                  

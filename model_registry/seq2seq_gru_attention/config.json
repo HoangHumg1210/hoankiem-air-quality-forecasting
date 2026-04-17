@@ -44,7 +44,7 @@
     "month_cos",
     "IsHoliday"
   ],
-  "best_epoch": 8,
-  "final_epochs": 11,
+  "best_epoch": 30,
+  "final_epochs": 41,
   "peak_threshold": 1.29542875289917
 }
