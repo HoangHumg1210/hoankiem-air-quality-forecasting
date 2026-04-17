@@ -10,7 +10,13 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from bundle_registry import load_registry_metrics as load_bundle_registry_metrics
-from inference import DEFAULT_TIMESTAMP_COL, forecast_recursive, load_model_bundle, prepare_raw_frame
+from inference import (
+    DEFAULT_TIMESTAMP_COL,
+    forecast_recursive,
+    keras_archive_contains_lambda,
+    load_model_bundle,
+    prepare_raw_frame,
+)
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -172,6 +178,23 @@ def resolve_bundle_dir(metrics_df: pd.DataFrame, model_name: str) -> Path:
     return APP_DIR / row["Bundle Dir"]
 
 
+def is_forecast_runtime_supported(bundle_dir: str | Path) -> bool:
+    bundle_path = Path(bundle_dir)
+    if not bundle_path.is_absolute():
+        bundle_path = APP_DIR / bundle_path
+
+    return not keras_archive_contains_lambda(bundle_path / "model.keras")
+
+
+def get_best_supported_forecast_model(metrics_df: pd.DataFrame) -> str | None:
+    ranked = metrics_df.sort_values("MAE", na_position="last").reset_index(drop=True)
+    for _, row in ranked.iterrows():
+        bundle_dir = APP_DIR / row["Bundle Dir"]
+        if is_forecast_runtime_supported(bundle_dir):
+            return str(row["Model"])
+    return None
+
+
 def load_bundle_runtime_limits(bundle_dir: str | Path) -> tuple[int, int]:
     bundle_path = Path(bundle_dir)
     if not bundle_path.is_absolute():
@@ -291,25 +314,8 @@ def load_latest_forecast(bundle_dir: Path, horizon_steps: int) -> tuple[pd.DataF
 
 
 def load_latest_forecast_or_timeline(bundle_dir: Path, horizon_steps: int) -> tuple[pd.DataFrame, pd.DataFrame, int, str]:
-    try:
-        history_df, forecast_df, step_hours = load_latest_forecast(bundle_dir, horizon_steps)
-        return history_df, forecast_df, step_hours, "forecast_ngoai_du_lieu"
-    except Exception:
-        timeline_df = load_bundle_timeline(bundle_dir)
-        if timeline_df.empty:
-            raise
-
-        step_hours = 3
-        max_steps = min(horizon_steps, len(timeline_df))
-        forecast_df = timeline_df.tail(max_steps).copy()
-        forecast_df = forecast_df.rename(columns={"timestamp": DEFAULT_TIMESTAMP_COL})
-        forecast_df = forecast_df[[DEFAULT_TIMESTAMP_COL, "y_true", "y_pred"]].copy()
-        forecast_df["step"] = range(1, len(forecast_df) + 1)
-
-        raw_df = prepare_raw_frame(load_raw_data(), step_hours=step_hours).reset_index()
-        start_ts = forecast_df[DEFAULT_TIMESTAMP_COL].min()
-        history_df = raw_df[raw_df[DEFAULT_TIMESTAMP_COL] < start_ts].tail(14).copy()
-        return history_df, forecast_df, step_hours, "test_timeline"
+    history_df, forecast_df, step_hours = load_latest_forecast(bundle_dir, horizon_steps)
+    return history_df, forecast_df, step_hours, "forecast_ngoai_du_lieu"
 
 
 def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame) -> go.Figure:
@@ -884,6 +890,7 @@ def render_app() -> None:
 
     best_row = metrics_df.sort_values("MAE", na_position="last").iloc[0]
     model_options = metrics_df["Model"].tolist()
+    best_supported_forecast_model = get_best_supported_forecast_model(metrics_df)
 
     st.sidebar.markdown(
         """
@@ -896,9 +903,32 @@ def render_app() -> None:
     )
 
     page = st.sidebar.radio("Điều hướng", ["Dự báo ", "Chất lượng mô hình"], label_visibility="collapsed")
-    default_index = model_options.index(best_row["Model"])
+    default_model = (
+        best_supported_forecast_model
+        if page == "Dự báo " and best_supported_forecast_model is not None
+        else str(best_row["Model"])
+    )
+    default_index = model_options.index(default_model)
     selected_model = st.sidebar.selectbox("Chọn mô hình", model_options, index=default_index)
-    sidebar_bundle_dir = resolve_bundle_dir(metrics_df, selected_model)
+    selected_model_effective = selected_model
+    if page == "Dự báo " and not is_forecast_runtime_supported(resolve_bundle_dir(metrics_df, selected_model)):
+        if best_supported_forecast_model is None:
+            st.error(
+                "Không có model nào forecast được trong runtime hiện tại. "
+                "Các bundle hiện có đều chứa Lambda layer và cần export lại."
+            )
+            st.stop()
+
+        selected_model_effective = best_supported_forecast_model
+        st.sidebar.warning(
+            "Model đang chọn không chạy được forecast ngoài dữ liệu trong runtime hiện tại "
+            "vì bundle chứa Lambda layer. Dashboard tự chuyển sang model khả dụng tốt nhất."
+        )
+
+    sidebar_bundle_dir = resolve_bundle_dir(
+        metrics_df,
+        selected_model if page == "Chất lượng mô hình" else selected_model_effective,
+    )
     max_horizon_steps, bundle_step_hours = load_bundle_runtime_limits(sidebar_bundle_dir)
     default_horizon_steps = min(24, max_horizon_steps)
     horizon_steps = st.sidebar.slider(
@@ -934,13 +964,23 @@ def render_app() -> None:
     active_model = (
         str(st.session_state.get("quality_focus_model", selected_model))
         if page == "Chất lượng mô hình"
-        else selected_model
+        else selected_model_effective
     )
     bundle_dir = resolve_bundle_dir(metrics_df, active_model)
     selected_row = metrics_df.loc[metrics_df["Model"] == active_model].iloc[0]
     timeline_df = load_bundle_timeline(bundle_dir)
 
-    history_df, forecast_df, step_hours, forecast_source = load_latest_forecast_or_timeline(bundle_dir, horizon_steps)
+    try:
+        history_df, forecast_df, step_hours, forecast_source = load_latest_forecast_or_timeline(bundle_dir, horizon_steps)
+    except Exception as exc:
+        if page == "Dự báo ":
+            st.error(
+                "Không thể tạo forecast ngoài dữ liệu cho model đang chọn. "
+                "App đã chặn fallback sang test timeline để tránh hiển thị dự báo sai ngữ nghĩa."
+            )
+            st.caption(f"Lỗi chi tiết: {type(exc).__name__}: {exc}")
+            st.stop()
+        raise
     history_df = history_df.tail(DEFAULT_HISTORY_WINDOW).copy()
 
     chart_key = f"forecast_chart_{active_model}_{horizon_steps}".replace(" ", "_")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -87,7 +88,27 @@ class LoadedBundle:
         return sorted(required)
 
 
+def keras_archive_contains_lambda(model_path: Path) -> bool:
+    if model_path.suffix.lower() != ".keras" or not model_path.exists():
+        return False
+
+    try:
+        with zipfile.ZipFile(model_path, "r") as archive:
+            config_text = archive.read("config.json").decode("utf-8", errors="ignore")
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return False
+
+    return '"class_name": "Lambda"' in config_text
+
+
 def _load_keras_model(model_path: Path) -> Any:
+    if keras_archive_contains_lambda(model_path):
+        raise RuntimeError(
+            "Bundle model.keras contains Keras Lambda layers serialized from notebook code. "
+            "Runtime loading is blocked because this artifact can crash TensorFlow on Windows. "
+            "Retrain or re-export the bundle without Lambda layers before using it for forecast."
+        )
+
     try:
         import tensorflow as tf
     except ImportError as exc:
