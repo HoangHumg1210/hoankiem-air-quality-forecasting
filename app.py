@@ -140,6 +140,27 @@ def format_optional_datetime(value: object) -> str | None:
     return parsed.strftime("%d/%m/%Y %H:%M")
 
 
+def build_time_axis_config(timestamps: pd.Series) -> dict:
+    parsed = pd.to_datetime(pd.Series(timestamps), errors="coerce").dropna().sort_values()
+    axis_config = dict(
+        title="",
+        type="date",
+        showgrid=False,
+        tickfont=dict(size=11, color="#64748b"),
+        hoverformat="%d/%m/%Y %H:%M",
+    )
+    if parsed.empty:
+        axis_config["tickformat"] = "%d/%m %H:%M"
+        return axis_config
+    same_day = parsed.dt.normalize().nunique() <= 1
+    axis_config["tickformat"] = "%H:%M" if same_day else "%d/%m %H:%M"
+    axis_config["tickformatstops"] = [
+        dict(dtickrange=[None, 86_400_000], value="%H:%M"),
+        dict(dtickrange=[86_400_000, None], value="%d/%m %H:%M"),
+    ]
+    return axis_config
+
+
 def get_project_data_range_text(step_hours: int) -> tuple[str, str]:
     prepared = prepare_raw_frame(load_raw_data(), step_hours=step_hours).reset_index()
     if prepared.empty:
@@ -270,6 +291,14 @@ def load_latest_forecast_or_timeline(bundle_dir: Path, horizon_steps: int) -> tu
 
 def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
+    all_timestamps = pd.concat(
+        [
+            history_df[DEFAULT_TIMESTAMP_COL],
+            forecast_df[DEFAULT_TIMESTAMP_COL],
+        ],
+        ignore_index=True,
+    )
+    xaxis_config = build_time_axis_config(all_timestamps)
     zones = [
         (0, 25, "Tốt", "rgba(22,163,74,0.13)", "#15803d"),
         (25, 50, "Trung bình", "rgba(202,138,4,0.13)", "#a16207"),
@@ -290,11 +319,11 @@ def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame) -> 
     for lower, upper, _, fill, _ in visible_zones:
         fig.add_hrect(y0=lower, y1=upper, fillcolor=fill, line_width=0)
 
-    fig.add_trace(go.Scatter(x=history_df[DEFAULT_TIMESTAMP_COL], y=history_df["PM25"], mode="lines+markers", name="Giá trị thực tế", line=dict(color="#3b82f6", width=2.5), marker=dict(size=6, color="#3b82f6", line=dict(color="white", width=1.5))))
-    fig.add_trace(go.Scatter(x=forecast_df[DEFAULT_TIMESTAMP_COL], y=forecast_df["y_pred"], mode="lines+markers", name="Dự báo", line=dict(color="#10b981", width=2.5, dash="dot"), marker=dict(size=6, color="#10b981", line=dict(color="white", width=1.5))))
+    fig.add_trace(go.Scatter(x=history_df[DEFAULT_TIMESTAMP_COL], y=history_df["PM25"], mode="lines+markers", name="Giá trị thực tế", line=dict(color="#3b82f6", width=2.5), marker=dict(size=6, color="#3b82f6", line=dict(color="white", width=1.5)), hovertemplate="%{x|%d/%m/%Y %H:%M}<br>%{y:.1f} µg/m³<extra>Giá trị thực tế</extra>"))
+    fig.add_trace(go.Scatter(x=forecast_df[DEFAULT_TIMESTAMP_COL], y=forecast_df["y_pred"], mode="lines+markers", name="Dự báo", line=dict(color="#10b981", width=2.5, dash="dot"), marker=dict(size=6, color="#10b981", line=dict(color="white", width=1.5)), hovertemplate="%{x|%d/%m/%Y %H:%M}<br>%{y:.1f} µg/m³<extra>Dự báo</extra>"))
 
     if "y_true" in forecast_df.columns and forecast_df["y_true"].notna().any():
-        fig.add_trace(go.Scatter(x=forecast_df[DEFAULT_TIMESTAMP_COL], y=forecast_df["y_true"], mode="lines+markers", name="Thực tế tương lai", line=dict(color="#ef4444", width=2), marker=dict(size=6, color="#ef4444")))
+        fig.add_trace(go.Scatter(x=forecast_df[DEFAULT_TIMESTAMP_COL], y=forecast_df["y_true"], mode="lines+markers", name="Thực tế tương lai", line=dict(color="#ef4444", width=2), marker=dict(size=6, color="#ef4444"), hovertemplate="%{x|%d/%m/%Y %H:%M}<br>%{y:.1f} µg/m³<extra>Thực tế tương lai</extra>"))
 
     current_x = history_df[DEFAULT_TIMESTAMP_COL].iloc[-1]
     peak = forecast_df.loc[forecast_df["y_pred"].idxmax()]
@@ -319,7 +348,7 @@ def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame) -> 
         plot_bgcolor="white",
         hovermode="x unified",
         legend=dict(orientation="h", y=1.12, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=12), itemsizing="constant"),
-        xaxis=dict(title="", showgrid=False, tickformat="%H:%M", tickfont=dict(size=11, color="#64748b")),
+        xaxis=xaxis_config,
         yaxis=dict(title="PM2.5 (µg/m³)", gridcolor="rgba(0,0,0,0.05)", range=[0, y_max], tickfont=dict(size=11, color="#64748b"), title_font=dict(size=12, color="#475569")),
     )
     return fig

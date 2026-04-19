@@ -506,10 +506,10 @@ def promote_best_bundle(
     Chọn bundle từ model_registry/:
       - bundle_key được chỉ định → dùng đó
       - Không có → chọn bundle có val_mae / mae nhỏ nhất
-    Copy toàn bộ sang best_model_bundle_1/.
+    Copy toàn bộ sang best_model_bundle/.
     """
     registry_dir = app_dir / "model_registry"
-    dest_dir     = app_dir / "best_model_bundle_1"
+    dest_dir     = app_dir / "best_model_bundle"
 
     if not registry_dir.exists():
         raise FileNotFoundError(
@@ -1012,7 +1012,7 @@ def parse_args() -> argparse.Namespace:
         "--app-dir",
         default=Path(__file__).resolve().parent,
         type=Path,
-        help="Project root chứa data/, model_registry/, best_model_bundle_1/.",
+        help="Project root chứa data/, model_registry/, best_model_bundle/.",
     )
     p.add_argument(
         "--bundle-key",
@@ -1075,7 +1075,7 @@ def main() -> None:
     app_dir = args.app_dir.resolve()
     # raw_data_path = app_dir / "data" / "processed" / "data2225_done.csv"
     raw_data_path = app_dir / "data2225_done.csv"
-    bundle_dir    = app_dir / "best_model_bundle_1"
+    bundle_dir    = app_dir / "best_model_bundle"
 
     logger.info("═" * 55)
     logger.info("PM2.5 FORECAST – DEPLOYMENT PREPARATION")
