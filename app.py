@@ -140,7 +140,7 @@ def format_optional_datetime(value: object) -> str | None:
     return parsed.strftime("%d/%m/%Y %H:%M")
 
 
-def build_time_axis_config(timestamps: pd.Series) -> dict:
+def build_time_axis_config(timestamps: pd.Series, *, step_hours: int | None = None) -> dict:
     parsed = pd.to_datetime(pd.Series(timestamps), errors="coerce").dropna().sort_values()
     axis_config = dict(
         title="",
@@ -148,16 +148,28 @@ def build_time_axis_config(timestamps: pd.Series) -> dict:
         showgrid=False,
         tickfont=dict(size=11, color="#64748b"),
         hoverformat="%d/%m/%Y %H:%M",
+        nticks=8,
+        tickangle=0,
+        automargin=True,
     )
     if parsed.empty:
-        axis_config["tickformat"] = "%d/%m %H:%M"
+        axis_config["tickformat"] = "%d/%m<br>%H:%M"
         return axis_config
-    same_day = parsed.dt.normalize().nunique() <= 1
-    axis_config["tickformat"] = "%H:%M" if same_day else "%d/%m %H:%M"
-    axis_config["tickformatstops"] = [
-        dict(dtickrange=[None, 86_400_000], value="%H:%M"),
-        dict(dtickrange=[86_400_000, None], value="%d/%m %H:%M"),
-    ]
+
+    span_hours = max((parsed.iloc[-1] - parsed.iloc[0]).total_seconds() / 3600, 0.0)
+    if span_hours <= 72:
+        axis_config["tickformat"] = "%d/%m<br>%H:%M"
+        axis_config["nticks"] = 10
+    elif span_hours <= 24 * 10:
+        axis_config["tickformat"] = "%d/%m<br>%H:%M"
+        axis_config["nticks"] = 8
+    elif span_hours <= 24 * 45:
+        axis_config["tickformat"] = "%d/%m"
+        axis_config["nticks"] = 10
+    else:
+        axis_config["tickformat"] = "%d/%m/%y"
+        axis_config["nticks"] = 8
+
     return axis_config
 
 
@@ -289,7 +301,7 @@ def load_latest_forecast_or_timeline(bundle_dir: Path, horizon_steps: int) -> tu
     return history_df, forecast_df, step_hours, "forecast_ngoai_du_lieu"
 
 
-def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame) -> go.Figure:
+def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame, *, step_hours: int) -> go.Figure:
     fig = go.Figure()
     all_timestamps = pd.concat(
         [
@@ -298,7 +310,7 @@ def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame) -> 
         ],
         ignore_index=True,
     )
-    xaxis_config = build_time_axis_config(all_timestamps)
+    xaxis_config = build_time_axis_config(all_timestamps, step_hours=step_hours)
     zones = [
         (0, 25, "Tốt", "rgba(22,163,74,0.13)", "#15803d"),
         (25, 50, "Trung bình", "rgba(202,138,4,0.13)", "#a16207"),
@@ -332,7 +344,7 @@ def make_forecast_chart(history_df: pd.DataFrame, forecast_df: pd.DataFrame) -> 
     fig.add_annotation(x=current_x, y=y_max * 0.97, text="Hiện tại", showarrow=False, bgcolor="white", bordercolor="#bfdbfe", borderwidth=1.5, borderpad=5, font=dict(size=11, color="#2563eb", family="sans-serif"), xanchor="center")
     fig.add_annotation(
         x=peak[DEFAULT_TIMESTAMP_COL], y=peak["y_pred"] + (y_max * 0.06),
-        text=f"{peak[DEFAULT_TIMESTAMP_COL].strftime('%H:%M')}<br><b>{peak['y_pred']:.1f} µg/m³</b>",
+        text=f"{peak[DEFAULT_TIMESTAMP_COL].strftime('%d/%m/%Y %H:%M')}<br><b>{peak['y_pred']:.1f} µg/m³</b>",
         showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5, arrowcolor="#10b981",
         bgcolor="white", bordercolor="#6ee7b7", borderwidth=1.5, borderpad=6,
         font=dict(size=11, color="#065f46"), xanchor="center",
@@ -381,11 +393,14 @@ def make_mae_chart(metrics_df: pd.DataFrame, selected_model: str) -> go.Figure:
     return fig
 
 
-def make_backtest_chart(timeline_df: pd.DataFrame, selected_model: str) -> go.Figure:
+def make_backtest_chart(timeline_df: pd.DataFrame, selected_model: str, *, step_hours: int) -> go.Figure:
     plot_df = timeline_df.sort_values("timestamp").copy()
+    dense_series = len(plot_df) > 180
+    trace_mode = "lines" if dense_series else "lines+markers"
+    marker_size = 0 if dense_series else 5
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=plot_df["timestamp"], y=plot_df["y_true"], mode="lines+markers", name="Thực tế", line=dict(color="#3b82f6", width=2.5), marker=dict(size=5, line=dict(color="white", width=1))))
-    fig.add_trace(go.Scatter(x=plot_df["timestamp"], y=plot_df["y_pred"], mode="lines+markers", name=selected_model, line=dict(color="#10b981", width=2.5, dash="dot"), marker=dict(size=5, line=dict(color="white", width=1))))
+    fig.add_trace(go.Scatter(x=plot_df["timestamp"], y=plot_df["y_true"], mode=trace_mode, name="Thực tế", line=dict(color="#3b82f6", width=2.5), marker=dict(size=marker_size, line=dict(color="white", width=1)), hovertemplate="%{x|%d/%m/%Y %H:%M}<br>%{y:.1f} µg/m³<extra>Thực tế</extra>"))
+    fig.add_trace(go.Scatter(x=plot_df["timestamp"], y=plot_df["y_pred"], mode=trace_mode, name=selected_model, line=dict(color="#10b981", width=2.5, dash="dot"), marker=dict(size=marker_size, line=dict(color="white", width=1)), hovertemplate="%{x|%d/%m/%Y %H:%M}<br>%{y:.1f} µg/m³<extra>Dự báo</extra>"))
     fig.update_layout(
         height=260,
         margin=dict(l=8, r=8, t=8, b=8),
@@ -393,7 +408,7 @@ def make_backtest_chart(timeline_df: pd.DataFrame, selected_model: str) -> go.Fi
         plot_bgcolor="white",
         hovermode="x unified",
         legend=dict(orientation="h", y=1.1, x=0, font=dict(size=12)),
-        xaxis=dict(title="", tickformat="%d/%m %H:%M", showgrid=False, tickfont=dict(size=11, color="#64748b")),
+        xaxis=build_time_axis_config(plot_df["timestamp"], step_hours=step_hours),
         yaxis=dict(title="PM2.5 (µg/m³)", gridcolor="rgba(0,0,0,0.05)", tickfont=dict(size=11, color="#64748b")),
     )
     return fig
@@ -488,9 +503,9 @@ def build_warning_html(forecast_df: pd.DataFrame, current_val: float, step_hours
     while end_pos < len(labels) - 1 and labels[end_pos + 1] == peak_label:
         end_pos += 1
 
-    start_time_text = forecast_df.iloc[start_pos][DEFAULT_TIMESTAMP_COL].strftime("%H:%M")
-    end_time_text = forecast_df.iloc[end_pos][DEFAULT_TIMESTAMP_COL].strftime("%H:%M")
-    peak_time_text = peak_row[DEFAULT_TIMESTAMP_COL].strftime("%H:%M")
+    start_time_text = forecast_df.iloc[start_pos][DEFAULT_TIMESTAMP_COL].strftime("%d/%m/%Y %H:%M")
+    end_time_text = forecast_df.iloc[end_pos][DEFAULT_TIMESTAMP_COL].strftime("%d/%m/%Y %H:%M")
+    peak_time_text = peak_row[DEFAULT_TIMESTAMP_COL].strftime("%d/%m/%Y %H:%M")
 
     window_steps = max(1, int(round(6 / step_hours)))
     six_hour_value = float(forecast_df["y_pred"].head(window_steps).iloc[-1])
@@ -1081,17 +1096,38 @@ def render_app() -> None:
     sidebar_bundle_dir = resolve_bundle_dir(metrics_df, selected_model if page == "Chất lượng mô hình" else selected_model_effective)
     max_horizon_steps, bundle_step_hours = load_bundle_runtime_limits(sidebar_bundle_dir)
     max_hours = max_horizon_steps * bundle_step_hours
-    default_hours = min(24, max_hours)
+    st.sidebar.caption(f"Dữ liệu trên dashboard được lấy mẫu theo bước {bundle_step_hours} giờ mỗi điểm.")
 
-    horizon_hours = st.sidebar.slider(f"Số giờ dự báo (tối đa {max_hours}h)", bundle_step_hours, max_hours, default_hours, step=bundle_step_hours)
-    horizon_steps = horizon_hours // bundle_step_hours
+    forecast_preset_specs = [
+        ("24 giờ", 24),
+        ("48 giờ", 48),
+        ("72 giờ", 72),
+        ("7 ngày", 168),
+        ("Tối đa", max_hours),
+    ]
+    forecast_preset_map: dict[str, int] = {}
+    for label, target_hours in forecast_preset_specs:
+        actual_hours = min(max_hours, max(bundle_step_hours, int(round(target_hours / bundle_step_hours)) * bundle_step_hours))
+        forecast_preset_map.setdefault(label, actual_hours)
+    forecast_preset_labels = [label for label, hours in forecast_preset_map.items() if hours <= max_hours]
+    default_forecast_label = "24 giờ" if "24 giờ" in forecast_preset_map else forecast_preset_labels[0]
+    selected_forecast_label = st.sidebar.selectbox("Khoảng dự báo", forecast_preset_labels, index=forecast_preset_labels.index(default_forecast_label))
+    horizon_hours = forecast_preset_map[selected_forecast_label]
+    horizon_steps = max(1, horizon_hours // bundle_step_hours)
 
-    history_window_options = [6, 12, 24, 48]
-    history_window_labels = [f"{h} giờ" for h in history_window_options]
-    selected_history_label = st.sidebar.selectbox("Số giờ lịch sử hiển thị", history_window_labels, index=2)
-    selected_history_window = history_window_options[history_window_labels.index(selected_history_label)]
+    history_window_hours_options = [12, 24, 48, 72]
+    history_window_map = {
+        (f"{hours} giờ gần nhất" if hours < 72 else "3 ngày gần nhất"): max(1, int(round(hours / bundle_step_hours)))
+        for hours in history_window_hours_options
+    }
+    history_window_labels = list(history_window_map.keys())
+    selected_history_label = st.sidebar.selectbox("Lịch sử hiển thị trên biểu đồ", history_window_labels, index=min(1, len(history_window_labels) - 1))
+    selected_history_window = history_window_map[selected_history_label]
 
-    forecast_page_size = st.sidebar.selectbox("Số mốc forecast mỗi trang", [6, 8, 10, 12], index=1)
+    forecast_page_size_options = [6, 8, 10, 12]
+    forecast_page_size_labels = [f"{points} cột ({points * bundle_step_hours} giờ)" for points in forecast_page_size_options]
+    selected_page_size_label = st.sidebar.selectbox("Số cột trong bảng dự báo", forecast_page_size_labels, index=1)
+    forecast_page_size = forecast_page_size_options[forecast_page_size_labels.index(selected_page_size_label)]
 
 
 
@@ -1210,7 +1246,7 @@ def render_app() -> None:
         # Main forecast chart
         with st.container(border=True):
             st.markdown('<div class="forecast-chart-anchor"></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="panel-title">📈 Diễn biến PM2.5 và dự báo trong {forecast_hours} giờ tới</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="panel-title">📈 Diễn biến PM2.5 và dự báo trong {forecast_hours} giờ tới (mỗi điểm = {step_hours} giờ)</div>', unsafe_allow_html=True)
             st.markdown(
                 '<div style="display:flex;gap:18px;margin-bottom:8px;font-size:14px;color:#64748b;font-weight:600">'
                 # '<span><span style="display:inline-block;width:20px;height:3px;background:#3b82f6;border-radius:999px;vertical-align:middle;margin-right:5px"></span>Giá trị thực tế</span>'
@@ -1218,7 +1254,8 @@ def render_app() -> None:
                 '</div>',
                 unsafe_allow_html=True,
             )
-            st.plotly_chart(make_forecast_chart(history_df, forecast_df), use_container_width=True, key=chart_key, on_select="rerun", selection_mode="points")
+            st.caption(f"Mỗi điểm trên biểu đồ tương ứng một mốc {step_hours} giờ. Với khoảng thời gian dài, trục X chỉ hiện mốc ngày để tránh rối; rê chuột vào điểm để xem ngày giờ cụ thể.")
+            st.plotly_chart(make_forecast_chart(history_df, forecast_df, step_hours=step_hours), use_container_width=True, key=chart_key, on_select="rerun", selection_mode="points")
 
         left, right = st.columns([1.7, 1.3], gap="large")
 
@@ -1413,30 +1450,57 @@ def render_app() -> None:
         with st.container(border=True):
             st.markdown('<div class="quality-summary-anchor"></div>', unsafe_allow_html=True)
             lower_left, lower_right = st.columns([2, 1], gap="large")
+            backtest_range_html = ""
+            _, active_step_hours = load_bundle_runtime_limits(bundle_dir)
 
             with lower_left:
                 
                     st.markdown('<div class="backtest-box-anchor"></div>', unsafe_allow_html=True)
-                    st.markdown('<div class="panel-title">📉 Giá trị thực tế vs Dự báo (Model đang chọn)</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="panel-title">📉 Giá trị thực tế vs Dự báo (Model đang chọn, mỗi điểm = {active_step_hours} giờ)</div>', unsafe_allow_html=True)
                     if timeline_df.empty:
                         st.info("Bundle này chưa có test_timeline.csv để vẽ backtest.")
                     else:
-                        timeline_options = timeline_df["timestamp"].dropna().sort_values().drop_duplicates().tolist()
-                        default_start_idx = max(0, len(timeline_options) - min(48, len(timeline_options)))
-                        selected_start, selected_end = st.select_slider(
-                            "Chọn khoảng thời gian backtest",
-                            options=timeline_options,
-                            value=(timeline_options[default_start_idx], timeline_options[-1]),
-                            format_func=lambda ts: ts.strftime("%d/%m/%Y %H:%M"),
-                            key=f"backtest_range_{active_model}",
-                        )
-                        filtered_timeline_df = timeline_df[(timeline_df["timestamp"] >= selected_start) & (timeline_df["timestamp"] <= selected_end)].copy()
-                        st.caption(f"Hiển thị {len(filtered_timeline_df)} mốc từ {selected_start.strftime('%d/%m/%Y %H:%M')} đến {selected_end.strftime('%d/%m/%Y %H:%M')}.")
-                        st.plotly_chart(make_backtest_chart(filtered_timeline_df, active_model), use_container_width=True)
+                        timeline_sorted = timeline_df["timestamp"].dropna().sort_values()
+                        min_ts = timeline_sorted.iloc[0]
+                        max_ts = timeline_sorted.iloc[-1]
+                        default_start_date = max(min_ts.date(), (max_ts - pd.Timedelta(days=30)).date())
+                        control_left, control_right = st.columns(2)
+                        with control_left:
+                            selected_start_date = st.date_input(
+                                "Từ ngày",
+                                value=default_start_date,
+                                min_value=min_ts.date(),
+                                max_value=max_ts.date(),
+                                key=f"backtest_start_date_{active_model}",
+                            )
+                        with control_right:
+                            selected_end_date = st.date_input(
+                                "Đến ngày",
+                                value=max_ts.date(),
+                                min_value=min_ts.date(),
+                                max_value=max_ts.date(),
+                                key=f"backtest_end_date_{active_model}",
+                            )
+
+                        if selected_start_date > selected_end_date:
+                            st.warning("Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc.")
+                        else:
+                            filtered_timeline_df = timeline_df[
+                                (timeline_df["timestamp"].dt.date >= selected_start_date)
+                                & (timeline_df["timestamp"].dt.date <= selected_end_date)
+                            ].copy()
+                            if filtered_timeline_df.empty:
+                                st.info("Không có dữ liệu backtest trong khoảng ngày đã chọn.")
+                            else:
+                                actual_start = filtered_timeline_df["timestamp"].min()
+                                actual_end = filtered_timeline_df["timestamp"].max()
+                                st.caption(f"Hiển thị {len(filtered_timeline_df)} mốc từ {actual_start.strftime('%d/%m/%Y %H:%M')} đến {actual_end.strftime('%d/%m/%Y %H:%M')}.")
+                                backtest_range_html = f"<p>Khoảng backtest đang xem từ <strong>{actual_start.strftime('%d/%m/%Y %H:%M')}</strong> đến <strong>{actual_end.strftime('%d/%m/%Y %H:%M')}</strong>.</p>"
+                                st.caption(f"Mỗi điểm trên biểu đồ backtest tương ứng một mốc {active_step_hours} giờ.")
+                                st.plotly_chart(make_backtest_chart(filtered_timeline_df, active_model, step_hours=active_step_hours), use_container_width=True)
 
             with lower_right:
                 peak_text = f"{selected_row['Peak MAE']:.2f}" if pd.notna(selected_row["Peak MAE"]) else "N/A"
-                _, active_step_hours = load_bundle_runtime_limits(bundle_dir)
                 data_start = format_optional_datetime(selected_row.get("Data Start"))
                 data_end = format_optional_datetime(selected_row.get("Data End"))
                 if data_start and data_end:
@@ -1444,13 +1508,13 @@ def render_app() -> None:
                 else:
                     project_start, project_end = get_project_data_range_text(active_step_hours)
                     training_range_html = (
-                        "<p>Bundle chưa lưu metadata <code>train_data_start</code>/<code>train_data_end</code>.</p>"
-                        f"<p>Dữ liệu project sau resample {active_step_hours}h: <strong>{project_start}</strong> – <strong>{project_end}</strong>.</p>"
+                        f"<p>Bundle chưa lưu mốc huấn luyện; dữ liệu project sau resample {active_step_hours}h kéo dài từ "
+                        f"<strong>{project_start}</strong> đến <strong>{project_end}</strong>.</p>"
                     )
                 summary_line = (
-                    f"<strong>{active_model}</strong> hiện là model tốt nhất theo MAE trong {len(ranking_df)} mô hình."
+                    f"<strong>{active_model}</strong> hiện có MAE thấp nhất và là model tốt nhất trong <strong>{len(ranking_df)}</strong> mô hình đã đánh giá."
                     if active_model == str(best_row["Model"])
-                    else f"<strong>{active_model}</strong> đứng hạng <strong>{current_rank}/{len(ranking_df)}</strong>. Model tốt nhất hiện tại là <strong>{best_row['Model']}</strong>."
+                    else f"<strong>{active_model}</strong> hiện đứng hạng <strong>{current_rank}/{len(ranking_df)}</strong>; model tốt nhất theo MAE lúc này là <strong>{best_row['Model']}</strong>."
                 )
                 with st.container():
                     st.markdown('<div class="conclusion-box-anchor"></div>', unsafe_allow_html=True)
@@ -1459,6 +1523,7 @@ def render_app() -> None:
                             f'<div class="conclusion-box">'
                             f'<div class="conclusion-title">💡 Kết luận</div>'
                             f"{training_range_html}"
+                            f"{backtest_range_html}"
                             f"<p>MAE <strong>{selected_row['MAE']:.2f}</strong> · MSE <strong>{selected_row['MSE']:.2f}</strong> · RMSE <strong>{selected_row['RMSE']:.2f}</strong> · Peak MAE <strong>{peak_text}</strong>.</p>"
                             f"<p>{summary_line}</p>"
                             f"</div>"

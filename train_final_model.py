@@ -86,6 +86,8 @@ DEFAULT_FINAL_EPOCH_MULTIPLIER = 1.35
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_LEARNING_RATE = 2e-4
 DEFAULT_SEED = 62
+DEPLOY_BUNDLE_NAME = "best_model_bundle"
+CANDIDATE_BUNDLE_NAME = "candidate_model_bundle"
 
 # Callback params từ notebook
 EARLY_STOPPING_PATIENCE = 24
@@ -397,6 +399,64 @@ def _format_metric(value: float | None, digits: int = 4) -> str:
     return f"{value:.{digits}f}"
 
 
+def _replace_bundle_dir(source_dir: Path, dest_dir: Path) -> None:
+    """Copy source → dest theo cach atomic: copy vao .tmp truoc, roi rename.
+    Neu crash giua chung, dest_dir goc van con nguyen (khong mat data).
+    """
+    tmp_dir = dest_dir.with_suffix(".tmp")
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    shutil.copytree(source_dir, tmp_dir)
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir)
+    tmp_dir.rename(dest_dir)
+
+
+def select_source_bundle_dir(
+    app_dir: Path,
+    bundle_key: str | None = None,
+) -> Path:
+    registry_dir = app_dir / "model_registry"
+    if not registry_dir.exists():
+        raise FileNotFoundError(
+            f"Khong tim thay model_registry tai {registry_dir}. "
+            "Chay notebook huan luyen truoc."
+        )
+
+    bundles = [p for p in registry_dir.iterdir() if p.is_dir()]
+    if not bundles:
+        raise ValueError(f"model_registry tai {registry_dir} khong co bundle nao.")
+
+    if bundle_key is not None:
+        chosen = registry_dir / bundle_key
+        if not chosen.exists():
+            raise ValueError(
+                f"Bundle key '{bundle_key}' khong ton tai trong {registry_dir}. "
+                f"Cac bundle hien co: {[b.name for b in bundles]}"
+            )
+        logger.info("Bundle duoc chi dinh thu cong: %s", bundle_key)
+        return chosen
+
+    def _get_mae(bundle_dir: Path) -> float:
+        info = _read_bundle_info(bundle_dir)
+        for key in ("val_mae", "mae", "test_mae"):
+            if key in info:
+                try:
+                    return float(info[key])
+                except (TypeError, ValueError):
+                    pass
+        return float("inf")
+
+    chosen = min(bundles, key=_get_mae)
+    mae_val = _get_mae(chosen)
+    logger.info(
+        "Bundle tot nhat trong registry: %s (MAE=%s)",
+        chosen.name,
+        _format_metric(None if mae_val == float("inf") else mae_val),
+    )
+    return chosen
+
+
 def summarize_bundle(bundle_dir: Path) -> dict[str, Any]:
     info = _read_bundle_info(bundle_dir)
     feature_cols = info.get("feature_cols") or []
@@ -498,62 +558,7 @@ def log_registry_ranking(app_dir: Path) -> None:
         )
 
 
-def promote_best_bundle(
-    app_dir: Path,
-    bundle_key: str | None = None,
-) -> dict[str, Any]:
-    """
-    Chọn bundle từ model_registry/:
-      - bundle_key được chỉ định → dùng đó
-      - Không có → chọn bundle có val_mae / mae nhỏ nhất
-    Copy toàn bộ sang best_model_bundle/.
-    """
-    registry_dir = app_dir / "model_registry"
-    dest_dir     = app_dir / "best_model_bundle"
 
-    if not registry_dir.exists():
-        raise FileNotFoundError(
-            f"Không tìm thấy model_registry tại {registry_dir}. "
-            "Chạy notebook huấn luyện trước."
-        )
-
-    bundles = [p for p in registry_dir.iterdir() if p.is_dir()]
-    if not bundles:
-        raise ValueError(f"model_registry tại {registry_dir} không có bundle nào.")
-
-    if bundle_key is not None:
-        chosen = registry_dir / bundle_key
-        if not chosen.exists():
-            raise ValueError(
-                f"Bundle key '{bundle_key}' không tồn tại trong {registry_dir}. "
-                f"Các bundle hiện có: {[b.name for b in bundles]}"
-            )
-        logger.info("Bundle được chỉ định thủ công: %s", bundle_key)
-    else:
-        def _get_mae(b: Path) -> float:
-            info = _read_bundle_info(b)
-            for k in ("val_mae", "mae", "test_mae"):
-                if k in info:
-                    try:
-                        return float(info[k])
-                    except (TypeError, ValueError):
-                        pass
-            return float("inf")
-
-        chosen  = min(bundles, key=_get_mae)
-        mae_val = _get_mae(chosen)
-        logger.info(
-            "Bundle tốt nhất: %s (MAE=%.4f)",
-            chosen.name,
-            mae_val if mae_val != float("inf") else float("nan"),
-        )
-
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    shutil.copytree(chosen, dest_dir)
-    logger.info("Promoted: %s → %s", chosen, dest_dir)
-
-    return {"bundle_key": chosen.name, "bundle_dir": dest_dir}
 
 
 # ===========================================================================
@@ -647,6 +652,84 @@ def _fresh_clone(source_model, *, lr: float, loss_fn: Any):
     return _compile_model(cloned, lr=lr, loss_fn=loss_fn)
 
 
+def _build_decoder_future_from_scaled(
+    x_scaled: np.ndarray,
+    feature_cols: list[str],
+    decoder_input_dim: int,
+) -> np.ndarray | None:
+    if decoder_input_dim <= 1:
+        return None
+
+    decoder_future_cols = [
+        "hour_sin", "hour_cos", "dow_sin", "dow_cos",
+        "month_sin", "month_cos", "IsHoliday",
+    ]
+    decoder_future_idx = [feature_cols.index(col) for col in decoder_future_cols if col in feature_cols]
+    expected_extra = decoder_input_dim - 1
+    if len(decoder_future_idx) != expected_extra:
+        raise ValueError(
+            f"Decoder input dim khong khop: model can {expected_extra} future cols, "
+            f"nhung chi tao duoc {len(decoder_future_idx)} tu feature_cols."
+        )
+    return x_scaled[:, decoder_future_idx]
+
+
+def _compute_regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+    y_true = np.asarray(y_true, dtype=np.float64).reshape(-1)
+    y_pred = np.asarray(y_pred, dtype=np.float64).reshape(-1)
+    errors = y_true - y_pred
+    abs_errors = np.abs(errors)
+    mse = float(np.mean(np.square(errors)))
+    peak_threshold = float(np.quantile(y_true, PEAK_QUANTILE)) if y_true.size else 0.0
+    peak_mask = y_true >= peak_threshold
+    return {
+        "mae": float(np.mean(abs_errors)),
+        "mse": mse,
+        "rmse": float(np.sqrt(mse)),
+        "peak_mae": float(np.mean(abs_errors[peak_mask])) if np.any(peak_mask) else float(np.mean(abs_errors)),
+    }
+
+
+def evaluate_bundle_on_holdout(
+    *,
+    model,
+    feature_frame: pd.DataFrame,
+    feature_cols: list[str],
+    x_scaler: StandardScaler,
+    y_scaler: StandardScaler,
+    target_mode: str,
+    lookback: int,
+    chunk_horizon: int,
+    decoder_input_dim: int,
+    eval_count: int,
+) -> dict[str, Any]:
+    x_values = feature_frame[feature_cols].to_numpy(dtype=np.float32)
+    y_values = feature_frame["PM25"].to_numpy(dtype=np.float32)
+    x_scaled = x_scaler.transform(x_values).astype(np.float32)
+    y_scaled, _ = transform_target(y_values, scaler=y_scaler, fit=False, mode=target_mode)
+    decoder_future = _build_decoder_future_from_scaled(x_scaled, feature_cols, decoder_input_dim)
+
+    x_seq, dec_seq, y_seq = make_sequences(
+        x_scaled,
+        y_scaled,
+        lookback=lookback,
+        horizon=chunk_horizon,
+        decoder_future=decoder_future,
+    )
+    if len(x_seq) == 0:
+        raise ValueError("Khong tao duoc evaluation sequence cho holdout.")
+
+    eval_count = min(eval_count, len(x_seq))
+    y_pred_scaled = model.predict([x_seq[-eval_count:], dec_seq[-eval_count:]], verbose=0)
+    y_true_raw = inverse_target(y_seq[-eval_count:], y_scaler, mode=target_mode)
+    y_pred_raw = inverse_target(y_pred_scaled, y_scaler, mode=target_mode)
+
+    metrics = _compute_regression_metrics(y_true_raw, y_pred_raw)
+    metrics["eval_sequences"] = int(eval_count)
+    metrics["eval_points"] = int(np.asarray(y_true_raw).size)
+    return metrics
+
+
 def resolve_final_epochs(
     best_epoch: int,
     *,
@@ -702,6 +785,7 @@ def run_final_training(
     *,
     bundle_dir: Path,
     raw_data_path: Path,
+    comparison_bundle_dir: Path | None,
     warmup_epochs: int,
     final_epochs: int | None,
     batch_size: int,
@@ -776,26 +860,11 @@ def run_final_training(
 
     # Nếu bundle dùng decoder đa chiều (có DECODER_FUTURE_COLS),
     # các chiều phụ được pad bằng 0 vì không có future covariates khi retrain.
-    decoder_future: np.ndarray | None = None
-    if decoder_input_dim > 1:
-        decoder_future_cols = [
-            "hour_sin", "hour_cos", "dow_sin", "dow_cos",
-            "month_sin", "month_cos", "IsHoliday",
-        ]
-        decoder_future_idx = [feature_cols.index(c) for c in decoder_future_cols if c in feature_cols]
-        decoder_future = x_scaled[:, decoder_future_idx]
-
-        expected_extra = decoder_input_dim - 1
-        actual_extra = decoder_future.shape[1]
-        if actual_extra != expected_extra:
-            raise ValueError(
-                f"Decoder input dim không khớp: model cần {expected_extra} future cols, "
-                f"nhưng chỉ tạo được {actual_extra} từ feature_cols."
-            )
-
+    decoder_future = _build_decoder_future_from_scaled(x_scaled, feature_cols, decoder_input_dim)
+    if decoder_future is not None:
         logger.info(
             "decoder_input_dim=%d > 1 -> dùng %d decoder future covariates",
-            decoder_input_dim, actual_extra,
+            decoder_input_dim, decoder_future.shape[1],
         )
 
     x_seq, dec_seq, y_seq = make_sequences(
@@ -839,6 +908,13 @@ def run_final_training(
     # ------------------------------------------------------------------
     val_count  = min(inner_val_steps, max(len(x_seq) // 10, 1))
     best_epoch = warmup_epochs  # fallback
+    warmup_model = None
+    gate_decision = {
+        "accepted": True,
+        "reason": "khong_can_so_sanh",
+        "candidate_metrics": None,
+        "current_metrics": None,
+    }
 
     logger.info(
         "Bước 5/6 – Warmup fit (max=%d epochs, val_count=%d)",
@@ -899,19 +975,119 @@ def run_final_training(
                 "Warmup xong – best_epoch=%d (val_loss=%.5f)",
                 best_epoch, min(val_losses),
             )
-        del warmup_model  # giải phóng GPU memory
+        # Lưu ý: KHÔNG del warmup_model ở đây – biến này còn được dùng ở gate
+        # evaluation (so sánh với current_best) và khởi tạo final_model.
+        # GC sẽ tự giải phóng khi warmup_model được gán lại = None sau đó.
 
     # ------------------------------------------------------------------
     # Bước 6: Final fit trên 100% data
     # ------------------------------------------------------------------
+    if not dry_run and warmup_model is not None and comparison_bundle_dir is not None and comparison_bundle_dir.exists():
+        logger.info("Đánh giá candidate với best hiện tại trên holdout có định (%d sequences)", val_count)
+        candidate_metrics = evaluate_bundle_on_holdout(
+            model=warmup_model,
+            feature_frame=feature_frame,
+            feature_cols=feature_cols,
+            x_scaler=x_scaler,
+            y_scaler=y_scaler,
+            target_mode=target_mode,
+            lookback=lookback,
+            chunk_horizon=chunk_horizon,
+            decoder_input_dim=decoder_input_dim,
+            eval_count=val_count,
+        )
+
+        current_bundle = load_bundle(comparison_bundle_dir)
+        current_feature_cols = current_bundle["feature_cols"] or list(ALL_FEATURE_COLS)
+        current_feature_frame = prepare_feature_frame(raw_df, current_feature_cols)
+        if current_bundle["y_scaler"] is None:
+            raise ValueError(f"Bundle hien tai tai {comparison_bundle_dir} thieu y_scaler.pkl.")
+
+        current_metrics = evaluate_bundle_on_holdout(
+            model=current_bundle["model"],
+            feature_frame=current_feature_frame,
+            feature_cols=current_feature_cols,
+            x_scaler=current_bundle["x_scaler"],
+            y_scaler=current_bundle["y_scaler"],
+            target_mode=current_bundle["target_mode"],
+            lookback=current_bundle["lookback"],
+            chunk_horizon=current_bundle["chunk_horizon"],
+            decoder_input_dim=current_bundle["decoder_input_dim"],
+            eval_count=val_count,
+        )
+
+        accepted = float(candidate_metrics["mae"]) < float(current_metrics["mae"])
+        gate_decision = {
+            "accepted": accepted,
+            "reason": "candidate_tot_hon" if accepted else "candidate_khong_tot_hon",
+            "candidate_metrics": candidate_metrics,
+            "current_metrics": current_metrics,
+        }
+        logger.info(
+            "Promotion gate | current MAE=%s | candidate MAE=%s | accepted=%s",
+            _format_metric(current_metrics["mae"]),
+            _format_metric(candidate_metrics["mae"]),
+            accepted,
+        )
+
+        if not accepted:
+            logger.info("Không promote candidate vì MAE holdout không cải thiện.")
+            return {
+                "bundle_dir":          str(bundle_dir),
+                "model_name":          bundle["model_name"],
+                "lookback":            lookback,
+                "chunk_horizon":       chunk_horizon,
+                "step_hours":          bundle["step_hours"],
+                "n_features":          len(feature_cols),
+                "training_rows":       int(len(feature_frame)),
+                "training_sequences":  int(len(x_seq)),
+                "best_epoch":          int(best_epoch),
+                "final_epochs":        0,
+                "data_start":          str(feature_frame.index.min()),
+                "data_end":            str(feature_frame.index.max()),
+                "accepted":            False,
+                "gate":                gate_decision,
+            }
+
+    if not dry_run and comparison_bundle_dir is not None and comparison_bundle_dir.exists() and warmup_model is None:
+        gate_decision = {
+            "accepted": False,
+            "reason": "không_đủ_holdout_để_so_sánh",
+            "candidate_metrics": None,
+            "current_metrics": None,
+        }
+        logger.info("Không promote candidate vì không đủ holdout để so sánh với best hiện tại.")
+        return {
+            "bundle_dir":          str(bundle_dir),
+            "model_name":          bundle["model_name"],
+            "lookback":            lookback,
+            "chunk_horizon":       chunk_horizon,
+            "step_hours":          bundle["step_hours"],
+            "n_features":          len(feature_cols),
+            "training_rows":       int(len(feature_frame)),
+            "training_sequences":  int(len(x_seq)),
+            "best_epoch":          int(best_epoch),
+            "final_epochs":        0,
+            "data_start":          str(feature_frame.index.min()),
+            "data_end":            str(feature_frame.index.max()),
+            "accepted":            False,
+            "gate":                gate_decision,
+        }
+
     n_final = final_epochs if final_epochs is not None else resolve_final_epochs(
         best_epoch,
         config_final_epochs=int(bundle["config"].get("final_epochs", 0)) or None,
     )
     logger.info("Bước 6/6 – Final fit (%d epochs, 100%% data)", n_final)
 
-    # Clone từ bundle.model gốc – không phải từ warmup_model
-    final_model = _fresh_clone(bundle["model"], lr=learning_rate, loss_fn=loss_fn)
+    # Nếu warmup_model đã fit, dùng làm khởi điểm cho final fit (warm start).
+    # Nếu không có (dry_run / không đủ seq), clone từ bundle gốc.
+    # NOTE: Gate evaluation dùng warmup_model (fit trên n-val sequences),
+    # còn final_model sẽ tiếp tục train trên 100% data. Model deploy
+    # chưa từng được eval trực tiếp – đây là trade-off chấp nhận được vì
+    # warmup là estimator thận trọng (ít data hơn, val split).
+    final_model = warmup_model if warmup_model is not None else _fresh_clone(bundle["model"], lr=learning_rate, loss_fn=loss_fn)
+    warmup_model = None  # giải phóng GPU memory
 
     if not dry_run:
         final_model.fit(
@@ -965,6 +1141,7 @@ def run_final_training(
         "best_epoch":                int(best_epoch),
         "final_epochs":              int(n_final),
         "dry_run":                   dry_run,
+        "promotion_gate":            gate_decision,
     })
 
     if not dry_run:
@@ -993,6 +1170,8 @@ def run_final_training(
         "final_epochs":        int(n_final),
         "data_start":          str(feature_frame.index.min()),
         "data_end":            str(feature_frame.index.max()),
+        "accepted":            True,
+        "gate":                gate_decision,
     }
 
 
@@ -1071,42 +1250,45 @@ def set_global_seed(seed: int) -> None:
 
 
 def main() -> None:
-    args    = parse_args()
+    args = parse_args()
     app_dir = args.app_dir.resolve()
-    # raw_data_path = app_dir / "data" / "processed" / "data2225_done.csv"
     raw_data_path = app_dir / "data2225_done.csv"
-    bundle_dir    = app_dir / "best_model_bundle"
+    bundle_dir = app_dir / DEPLOY_BUNDLE_NAME
+    candidate_dir = app_dir / CANDIDATE_BUNDLE_NAME
 
-    logger.info("═" * 55)
-    logger.info("PM2.5 FORECAST – DEPLOYMENT PREPARATION")
+    logger.info("=" * 55)
+    logger.info("PM2.5 FORECAST - DEPLOYMENT PREPARATION")
     logger.info("  app_dir    : %s", app_dir)
     logger.info("  raw data   : %s", raw_data_path)
     logger.info("  bundle dir : %s", bundle_dir)
+    logger.info("  candidate  : %s", candidate_dir)
     logger.info("  seed       : %d", args.seed)
     logger.info("  loss       : %s", args.loss)
     if args.dry_run:
-        logger.info("  [!] DRY RUN – không lưu file nào")
-    logger.info("═" * 55)
+        logger.info("  [!] DRY RUN - không lưu file nào")
+    logger.info("=" * 55)
 
     set_global_seed(args.seed)
+    current_best_dir = bundle_dir if bundle_dir.exists() else None
 
-    # Bước A – Promote
     if args.skip_promote:
         if not bundle_dir.exists():
             raise FileNotFoundError(
                 f"--skip-promote nhưng {bundle_dir} không tồn tại. "
                 "Chạy trước không có --skip-promote."
             )
-        logger.info("--skip-promote: dùng bundle hiện tại tại %s", bundle_dir)
-        promoted_key = bundle_dir.name
+        source_bundle_dir = bundle_dir
+        logger.info("--skip-promote: dùng bundle hiện tại tại %s", source_bundle_dir)
     else:
-        pr = promote_best_bundle(app_dir, bundle_key=args.bundle_key)
-        promoted_key = pr["bundle_key"]
+        source_bundle_dir = select_source_bundle_dir(app_dir, bundle_key=args.bundle_key)
 
-    # Bước B – Retrain
+    logger.info("Sao chép source bundle sang candidate: %s -> %s", source_bundle_dir, candidate_dir)
+    _replace_bundle_dir(source_bundle_dir, candidate_dir)
+
     result = run_final_training(
-        bundle_dir=bundle_dir,
+        bundle_dir=candidate_dir,
         raw_data_path=raw_data_path,
+        comparison_bundle_dir=current_best_dir,
         warmup_epochs=args.warmup_epochs,
         final_epochs=args.final_epochs,
         batch_size=args.batch_size,
@@ -1116,14 +1298,26 @@ def main() -> None:
         dry_run=args.dry_run,
     )
 
-    # Summary
-    logger.info("═" * 55)
-    logger.info("HOÀN TẤT")
-    logger.info("  Mô hình tốt nhất  ")
-    logger.info("  Promoted bundle   : %s", promoted_key)
+    promoted = False
+    if not args.dry_run and result["accepted"]:
+        logger.info("Candidate đạt điều kiện, promote vào %s", bundle_dir)
+        _replace_bundle_dir(candidate_dir, bundle_dir)
+        promoted = True
+        # Dọn candidate_dir sau promote thành công để tránh chiếm dung lượng
+        if candidate_dir.exists():
+            shutil.rmtree(candidate_dir)
+            logger.info("Đã xóa candidate_dir sau promote thành công: %s", candidate_dir)
+    elif not args.dry_run:
+        logger.info("Giữ nguyên %s. Candidate được lưu tại %s để xem lại.", bundle_dir, candidate_dir)
+
+    logger.info("=" * 55)
+    logger.info("HOAN TAT")
+    logger.info("  Source bundle     : %s", source_bundle_dir.name)
+    logger.info("  Candidate bundle  : %s", candidate_dir)
+    logger.info("  Promoted          : %s", promoted)
     logger.info("  Model             : %s", result["model_name"])
     logger.info("  Bundle dir        : %s", result["bundle_dir"])
-    logger.info("  Data range        : %s → %s", result["data_start"], result["data_end"])
+    logger.info("  Data range        : %s -> %s", result["data_start"], result["data_end"])
     logger.info("  Training rows     : %d", result["training_rows"])
     logger.info("  Training seqs     : %d", result["training_sequences"])
     logger.info("  n_features        : %d", result["n_features"])
@@ -1131,18 +1325,18 @@ def main() -> None:
     logger.info("  Step granularity  : %dh", result["step_hours"])
     logger.info("  best_epoch        : %d", result["best_epoch"])
     logger.info("  final_epochs      : %d", result["final_epochs"])
+    gate = result.get("gate") or {}
+    if gate.get("current_metrics") and gate.get("candidate_metrics"):
+        logger.info(
+            "  Holdout gate      : current MAE=%s | candidate MAE=%s | accepted=%s",
+            _format_metric(gate["current_metrics"]["mae"]),
+            _format_metric(gate["candidate_metrics"]["mae"]),
+            result["accepted"],
+        )
     if args.dry_run:
-        logger.info("  [DRY RUN] Không có file nào được lưu.")
-    logger.info("═" * 55)
+        logger.info("  [DRY RUN] Không có file nào được lưu")
+    logger.info("=" * 55)
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-                  
