@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Kiến trúc hệ thống dự báo PM2.5</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#f0f4f8;padding:30px;min-width:1300px}
+h1{text-align:center;font-size:22px;color:#1e293b;margin-bottom:24px;letter-spacing:-0.02em}
+.canvas{position:relative;width:1260px;margin:0 auto;height:820px}
+/* Pipeline boxes */
+.box{position:absolute;border-radius:16px;padding:16px 18px;border:2.5px solid;background:#fff;box-shadow:0 4px 20px rgba(0,0,0,0.07)}
+.box .title{font-size:15px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.box .title .icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;flex-shrink:0}
+
+/* Colors */
+.blue{border-color:#93c5fd}.blue .title .icon{background:#3b82f6}
+.green{border-color:#86efac}.green .title .icon{background:#22c55e}
+.orange{border-color:#fdba74}.orange .title .icon{background:#f97316}
+.yellow{border-color:#fde68a}.yellow .title .icon{background:#eab308}
+.purple{border-color:#c4b5fd}.purple .title .icon{background:#8b5cf6}
+
+.box .title span{color:#1e293b}
+
+/* Inner items */
+.item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px 12px;margin:6px 0;font-size:12.5px;color:#334155;display:flex;align-items:center;gap:8px}
+.item.highlight{background:#eff6ff;border-color:#bfdbfe}
+.item .emoji{font-size:16px;flex-shrink:0}
+.item code{background:#e0e7ff;padding:1px 6px;border-radius:4px;font-size:11.5px;color:#4338ca;font-weight:600}
+.item strong{color:#0f172a}
+.mini-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}
+.mini-table th{background:#eff6ff;padding:4px 8px;text-align:left;color:#475569;font-weight:700;border:1px solid #dbeafe}
+.mini-table td{padding:4px 8px;border:1px solid #e2e8f0;color:#334155}
+.tech-badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.tech-badge{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:3px 8px;font-size:10.5px;font-weight:700;color:#475569}
+.tech-badge.tf{background:#fff3e0;border-color:#ffe0b2;color:#e65100}
+.tech-badge.st{background:#fce4ec;border-color:#f8bbd0;color:#c62828}
+.tech-badge.pl{background:#e8f5e9;border-color:#c8e6c9;color:#2e7d32}
+.tech-badge.pd{background:#e3f2fd;border-color:#bbdefb;color:#1565c0}
+.tech-badge.sk{background:#fff8e1;border-color:#fff59d;color:#f57f17}
+.models-list{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+.model-chip{background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:3px 10px;font-size:11px;font-weight:700;color:#92400e}
+
+/* Arrows - using SVG overlay */
+svg.arrows{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+svg.arrows text{font-family:'Segoe UI',sans-serif;font-size:11px;font-weight:700}
+
+/* Sub-sections inside boxes */
+.sub{border-left:3px solid #cbd5e1;padding-left:10px;margin:8px 0}
+.sub-title{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px}
+
+.flow-row{display:flex;align-items:center;gap:6px;margin:4px 0;font-size:12px;color:#475569}
+.flow-arrow{color:#94a3b8;font-weight:800;font-size:14px}
+
+.page-tab{display:inline-block;padding:4px 12px;border-radius:8px 8px 0 0;font-size:11.5px;font-weight:700;cursor:default;margin-right:2px}
+.page-tab.active{background:#dcfce7;color:#166534;border:1px solid #86efac;border-bottom:none}
+.page-tab.inactive{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-bottom:none}
+
+.metrics-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px}
+.metric-mini{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:4px 8px;font-size:11px;text-align:center}
+.metric-mini strong{color:#166534}
+.metric-mini span{color:#64748b}
+
+.bundle-files{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.bundle-file{background:#fef9c3;border:1px solid #fde68a;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:600;color:#854d0e}
+</style>
+</head>
+<body>
+<h1>🏗️ Kiến trúc hệ thống dự báo chất lượng không khí PM2.5 — Hoàn Kiếm</h1>
+
+<div class="canvas">
+
+<!-- SVG Arrows -->
+<svg class="arrows" viewBox="0 0 1260 820">
+<defs>
+<marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/></marker>
+<marker id="ah-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6"/></marker>
+<marker id="ah-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#22c55e"/></marker>
+<marker id="ah-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#f97316"/></marker>
+<marker id="ah-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#8b5cf6"/></marker>
+</defs>
+
+<!-- Data Pipeline → Training Pipeline -->
+<path d="M 250 340 L 250 410" stroke="#3b82f6" stroke-width="2.5" fill="none" marker-end="url(#ah-blue)" stroke-dasharray="6,4"/>
+<text x="258" y="380" fill="#3b82f6">historical data</text>
+
+<!-- Training → Model Registry -->
+<path d="M 420 580 L 520 580" stroke="#f97316" stroke-width="2.5" fill="none" marker-end="url(#ah-orange)"/>
+<text x="435" y="572" fill="#f97316">save bundle</text>
+
+<!-- Model Registry → Inference -->
+<path d="M 770 580 L 870 580" stroke="#eab308" stroke-width="2.5" fill="none" marker-end="url(#ah)" stroke-dasharray="6,4"/>
+<text x="785" y="572" fill="#92400e">load bundle</text>
+
+<!-- Data Pipeline → Inference -->
+<path d="M 480 200 C 700 200, 700 200, 1050 410" stroke="#3b82f6" stroke-width="2" fill="none" marker-end="url(#ah-blue)" stroke-dasharray="5,4"/>
+<text x="720" y="280" fill="#3b82f6">real-time data</text>
+
+<!-- Inference → Dashboard -->
+<path d="M 1050 410 L 1050 340" stroke="#8b5cf6" stroke-width="2.5" fill="none" marker-end="url(#ah-purple)"/>
+<text x="1060" y="380" fill="#8b5cf6">forecast_df</text>
+
+<!-- promote best arrow -->
+<path d="M 350 720 C 350 770, 630 770, 630 710" stroke="#f97316" stroke-width="2" fill="none" marker-end="url(#ah-orange)" stroke-dasharray="5,3"/>
+<text x="430" y="785" fill="#f97316">promote_best_model.py</text>
+
+</svg>
+
+<!-- ===== BOX 1: Data Pipeline (Top-Left) ===== -->
+<div class="box blue" style="left:0;top:0;width:490;height:330">
+<div class="title"><div class="icon">📊</div><span>Data Pipeline</span></div>
+<div class="item"><span class="emoji">📄</span><strong>data2225_done.csv</strong> — Dữ liệu PM2.5 Hoàn Kiếm 2022–2025</div>
+<div class="flow-row">
+<span class="flow-arrow">↓</span> <code>load_raw_data()</code>
+</div>
+<div class="item highlight"><span class="emoji">⚙️</span><code>prepare_raw_frame()</code> Resample theo <strong>step_hours</strong> (3h)</div>
+<div class="flow-row">
+<span class="flow-arrow">↓</span> Feature Engineering
+</div>
+<div class="item"><span class="emoji">🧮</span><code>build_history_feature_frame()</code></div>
+<table class="mini-table">
+<tr><th>Feature</th><th>Loại</th></tr>
+<tr><td>PM25_lag_{1,8,16,...,56}</td><td>Lag features</td></tr>
+<tr><td>PM25_roll_mean/std/max_8,24</td><td>Rolling stats</td></tr>
+<tr><td>hour_sin/cos, dow_sin/cos</td><td>Cyclical time</td></tr>
+<tr><td>PM25_same_hour_mean_3d/7d</td><td>Seasonal</td></tr>
+</table>
+<div class="tech-badges">
+<span class="tech-badge pd">🐼 Pandas</span>
+<span class="tech-badge">📐 NumPy</span>
+</div>
+</div>
+
+<!-- ===== BOX 2: Streamlit Dashboard (Top-Right) ===== -->
+<div class="box green" style="left:700;top:0;width:550;height:330">
+<div class="title"><div class="icon">🖥️</div><span>Streamlit Dashboard — app.py</span></div>
+<div style="margin-bottom:6px">
+<span class="page-tab active">📈 Trang Dự báo</span>
+<span class="page-tab inactive">📊 Chất lượng mô hình</span>
+</div>
+<div class="sub">
+<div class="sub-title">Trang Dự báo</div>
+<div class="item"><span class="emoji">🃏</span>4 Metric Cards: PM2.5 hiện tại · Dự báo · Thay đổi · AQI</div>
+<div class="item"><span class="emoji">📈</span>Plotly Chart: Thực tế + Dự báo + Vùng AQI màu</div>
+<div class="item"><span class="emoji">⏱️</span>Bảng dự báo theo giờ (chip cards + phân trang)</div>
+<div class="item"><span class="emoji">🔔</span>Cảnh báo & Khuyến nghị sức khỏe</div>
+</div>
+<div class="sub">
+<div class="sub-title">Trang Chất lượng mô hình</div>
+<div class="item"><span class="emoji">📊</span>Biểu đồ MAE (click chọn model) + Bảng so sánh N models</div>
+<div class="item"><span class="emoji">📉</span>Backtest: y_true vs y_pred + Kết luận</div>
+</div>
+<div class="tech-badges">
+<span class="tech-badge st">🎈 Streamlit</span>
+<span class="tech-badge pl">📊 Plotly</span>
+<span class="tech-badge">🎨 Custom CSS</span>
+</div>
+</div>
+
+<!-- ===== BOX 3: Training Pipeline (Bottom-Left) ===== -->
+<div class="box orange" style="left:0;top:420;width:420;height:320">
+<div class="title"><div class="icon">🏋️</div><span>Training Pipeline</span></div>
+<div class="item"><span class="emoji">📓</span><strong>notebooks/</strong> — Jupyter nghiên cứu & thử nghiệm</div>
+<div class="flow-row"><span class="flow-arrow">↓</span></div>
+<div class="item highlight"><span class="emoji">🐍</span><code>train_final_model.py</code> — Train & đánh giá model</div>
+<div style="margin:6px 0">
+<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px">Deep Learning Models:</div>
+<div class="models-list">
+<span class="model-chip">LSTM</span>
+<span class="model-chip">GRU</span>
+<span class="model-chip">CNN-GRU</span>
+<span class="model-chip">Encoder-Decoder</span>
+</div>
+</div>
+<div class="flow-row"><span class="flow-arrow">↓</span> Xuất Model Bundle</div>
+<div class="item"><span class="emoji">📦</span><strong>Model Bundle</strong></div>
+<div class="bundle-files">
+<span class="bundle-file">model.keras</span>
+<span class="bundle-file">config.json</span>
+<span class="bundle-file">metrics.json</span>
+<span class="bundle-file">x_scaler.pkl</span>
+<span class="bundle-file">y_scaler.pkl</span>
+<span class="bundle-file">feature_cols.pkl</span>
+</div>
+<div class="tech-badges">
+<span class="tech-badge tf">🔶 TensorFlow/Keras</span>
+<span class="tech-badge sk">📐 scikit-learn</span>
+</div>
+</div>
+
+<!-- ===== BOX 4: Model Registry (Bottom-Center) ===== -->
+<div class="box yellow" style="left:520;top:420;width:250;height:320">
+<div class="title"><div class="icon">🗄️</div><span>Model Registry</span></div>
+<div class="item"><span class="emoji">📂</span><strong>model_registry/</strong></div>
+<div class="item" style="font-size:11px;padding:5px 10px">
+├── bundle_lstm/<br>
+├── bundle_gru/<br>
+├── bundle_cnn_gru/<br>
+└── ...
+</div>
+<div class="item highlight"><span class="emoji">⭐</span><strong>best_model_bundle/</strong></div>
+<div class="item"><span class="emoji">🐍</span><code>bundle_registry.py</code></div>
+<div class="metrics-grid">
+<div class="metric-mini"><span>MAE</span><br><strong>📉</strong></div>
+<div class="metric-mini"><span>MSE</span><br><strong>📊</strong></div>
+<div class="metric-mini"><span>RMSE</span><br><strong>📐</strong></div>
+<div class="metric-mini"><span>MAPE</span><br><strong>📌</strong></div>
+</div>
+</div>
+
+<!-- ===== BOX 5: Inference Engine (Bottom-Right) ===== -->
+<div class="box purple" style="left:870;top:420;width:380;height:320">
+<div class="title"><div class="icon">🧠</div><span>Inference Engine — inference.py</span></div>
+<div class="item"><span class="emoji">📦</span><code>LoadedBundle</code> — model + scalers + config</div>
+<div class="flow-row"><span class="flow-arrow">↓</span> <code>build_inference_inputs()</code></div>
+<div class="item highlight"><span class="emoji">📐</span>X_scaled <strong>[1, lookback, features]</strong></div>
+<div class="item highlight"><span class="emoji">🎯</span>decoder_input <strong>[1, horizon, dim]</strong></div>
+<div class="flow-row"><span class="flow-arrow">↓</span> <code>model.predict([X, decoder])</code></div>
+<div class="item"><span class="emoji">🔄</span><code>forecast_recursive()</code> — Multi-step dự báo</div>
+<div class="flow-row"><span class="flow-arrow">↓</span> <code>inverse_target()</code> log1p → expm1</div>
+<div class="item" style="background:#f0fdf4;border-color:#bbf7d0"><span class="emoji">✅</span><strong>forecast_df</strong> — PM2.5 dự báo (µg/m³)</div>
+<div class="tech-badges">
+<span class="tech-badge tf">🔶 TensorFlow</span>
+<span class="tech-badge">📐 NumPy</span>
+</div>
+</div>
+
+</div>
+</body>
+</html>

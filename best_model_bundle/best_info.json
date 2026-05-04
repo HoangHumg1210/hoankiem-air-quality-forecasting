@@ -1,0 +1,15 @@
+{
+  "retrained_on_full_data": true,
+  "retrained_at_utc": "2026-04-26T13:46:12.090224+00:00",
+  "full_training_rows": 11529,
+  "full_training_sequences": 11417,
+  "best_epoch": 69,
+  "final_epochs": 70,
+  "dry_run": false,
+  "promotion_gate": {
+    "accepted": true,
+    "reason": "khong_can_so_sanh",
+    "candidate_metrics": null,
+    "current_metrics": null
+  }
+}
