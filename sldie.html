@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Slide Đặt Vấn Đề - Air Quality</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    body {
+      background-color: #0f172a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    /* Slide Frame 16:9 */
+    .slide-canvas {
+      width: 1280px;
+      height: 720px;
+      background: linear-gradient(135deg, #f8fafc 0%, #edf4f7 100%);
+      border-radius: 20px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
+      position: relative;
+      padding: 56px 64px 44px 64px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Background Accent Glow */
+    .slide-canvas::before {
+      content: '';
+      position: absolute;
+      width: 420px;
+      height: 420px;
+      background: radial-gradient(circle, rgba(14, 165, 233, 0.12) 0%, rgba(255, 255, 255, 0) 70%);
+      top: -100px;
+      right: -80px;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* Header */
+    .slide-header {
+      position: relative;
+      z-index: 1;
+      margin-bottom: 32px;
+    }
+
+    .tag {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1.8px;
+      color: #0284c7;
+      text-transform: uppercase;
+      display: inline-block;
+      margin-bottom: 6px;
+    }
+
+    .title {
+      font-size: 38px;
+      font-weight: 800;
+      color: #0f172a;
+      letter-spacing: -0.5px;
+    }
+
+    /* Body Layout: 2 Columns */
+    .slide-body {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1.55fr 1fr;
+      gap: 32px;
+      flex: 1;
+    }
+
+    /* Left Column */
+    .left-col {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* 3 Metric Cards */
+    .cards-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .stat-card {
+      background: #ffffff;
+      padding: 22px 18px;
+      border-radius: 16px;
+      box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 155px;
+    }
+
+    .stat-number {
+      font-size: 46px;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 10px;
+    }
+
+    .c-orange { color: #ea580c; }
+    .c-red { color: #dc2626; }
+    .c-dark { color: #1e293b; }
+
+    .stat-desc {
+      font-size: 13px;
+      line-height: 1.5;
+      color: #475569;
+      font-weight: 500;
+    }
+
+    /* Context Description */
+    .context-box {
+      font-size: 15px;
+      line-height: 1.6;
+      color: #334155;
+      background: rgba(255, 255, 255, 0.6);
+      padding: 16px 20px;
+      border-radius: 12px;
+      border-left: 4px solid #0284c7;
+    }
+
+    /* Risk / Vulnerability Banner */
+    .risk-banner {
+      background: #ffffff;
+      padding: 16px 20px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.03);
+      border: 1px solid #fed7aa;
+    }
+
+    .risk-icon {
+      width: 40px;
+      height: 40px;
+      min-width: 40px;
+      background: #ffedd5;
+      color: #c2410c;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .risk-text {
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: #475569;
+    }
+
+    .risk-text strong {
+      color: #9a3412;
+      font-weight: 700;
+    }
+
+    /* Right Column - Deep Blue/Cyan Card */
+    .right-col {
+      background: linear-gradient(160deg, #0e374e 0%, #082232 100%);
+      border-radius: 18px;
+      padding: 30px 28px;
+      color: #ffffff;
+      box-shadow: 0 10px 30px rgba(14, 55, 78, 0.25);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .right-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 22px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .right-title::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #38bdf8;
+      border-radius: 50%;
+    }
+
+    .right-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .right-item {
+      position: relative;
+      padding-left: 20px;
+      font-size: 14px;
+      line-height: 1.55;
+      color: #cbd5e1;
+    }
+
+    .right-item::before {
+      content: '•';
+      position: absolute;
+      left: 0;
+      top: -2px;
+      color: #38bdf8;
+      font-size: 20px;
+    }
+
+    .right-item strong {
+      color: #ffffff;
+      display: block;
+      font-size: 14.5px;
+      margin-bottom: 2px;
+    }
+
+    /* Footer */
+    .slide-footer {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 20px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(203, 213, 225, 0.6);
+      font-size: 12px;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="slide-canvas">
+    <!-- Header -->
+    <div class="slide-header">
+      <span class="tag">01 · Đặt vấn đề</span>
+      <h1 class="title">Chất lượng không khí Hà Nội đang ở mức báo động</h1>
+    </div>
+
+    <!-- Body -->
+    <div class="slide-body">
+      
+      <!-- Left Column -->
+      <div class="left-col">
+        <!-- 3 Cards -->
+        <div class="cards-row">
+          <div class="stat-card">
+            <div class="stat-number c-orange">168</div>
+            <div class="stat-desc">AQI tại ĐH Bách Khoa tối 06/04/2026 — Ngưỡng có hại</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number c-red">231</div>
+            <div class="stat-desc">AQI Hà Nội lúc 18h30 07/12/2025 — Ngưỡng rất có hại</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number c-dark">#1</div>
+            <div class="stat-desc">Vị trí ô nhiễm nhất thế giới tại các thời điểm ghi nhận</div>
+          </div>
+        </div>
+
+        <!-- Description -->
+        <div class="context-box">
+          Diễn biến nồng độ bụi mịn PM2.5 tại Hà Nội lặp lại theo mùa và theo giờ cao điểm. Việc phụ thuộc vào các chỉ số quá khứ hoặc thời gian thực khiến công tác chủ động phòng ngừa của người dân luôn ở thế bị động.
+        </div>
+
+        <!-- Risk Warning -->
+        <div class="risk-banner">
+          <div class="risk-icon">⚠</div>
+          <div class="risk-text">
+            <strong>Nhóm dễ tổn thương:</strong> Trẻ em, người cao tuổi và người có bệnh nền hô hấp – tim mạch chịu ảnh hưởng sức khỏe trực tiếp nhất khi nồng độ PM2.5 tăng vọt đột ngột.
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column -->
+      <div class="right-col">
+        <div>
+          <div class="right-title">Động lực thực hiện đề tài</div>
+          <ul class="right-list">
+            <li class="right-item">
+              <strong>Độ phân giải quy mô lớn</strong>
+              Các mô hình quốc tế dự báo cho diện tích rộng (~10km), làm mờ đi đặc thù vi khí hậu và giao thông tại các phường nội thành.
+            </li>
+            <li class="right-item">
+              <strong>Yếu tố đặc thù bản địa</strong>
+              Biến động PM2.5 gắn liền với thói quen giờ tan tầm, phố đi bộ cuối tuần, hiện tượng nghịch nhiệt mùa đông và các kỳ lễ, Tết.
+            </li>
+            <li class="right-item">
+              <strong>Mục tiêu kỹ thuật</strong>
+              Xây dựng pipeline dữ liệu hoàn chỉnh, thử nghiệm các mô hình học máy để dự báo ngắn hạn chuỗi thời gian cho trạm đo cụ thể.
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="slide-footer">
+      <span>Dự báo chất lượng không khí PM2.5 — Báo cáo đề tài</span>
+      <span>Trang 03</span>
+    </div>
+  </div>
+
+</body>
+</html>
