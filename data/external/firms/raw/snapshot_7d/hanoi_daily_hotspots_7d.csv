@@ -1,0 +1,12 @@
+acq_date,sensor,hotspots,frp_sum
+2026-10-23,modis_7d,1,4.73
+2026-10-23,viirs_snpp_7d,4,17.23
+2026-10-25,viirs_noaa20_7d,4,24.09
+2026-10-25,viirs_snpp_7d,2,7.57
+2026-10-26,viirs_noaa20_7d,1,1.71
+2026-10-26,viirs_snpp_7d,1,0.58
+2026-10-27,viirs_noaa20_7d,1,2.45
+2026-10-27,viirs_snpp_7d,1,0.39
+2026-10-28,modis_7d,1,28.1
+2026-10-28,viirs_noaa20_7d,2,2.95
+2026-10-28,viirs_snpp_7d,3,4.92

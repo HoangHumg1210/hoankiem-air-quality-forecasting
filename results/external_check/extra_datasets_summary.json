@@ -1,0 +1,47 @@
+{
+  "coverage_hours": 40608,
+  "crosscheck_weatherbit_vs_nasa_power": {
+    "Temperature_r": 0.922,
+    "Temperature_MAE_C": 2.2,
+    "Temperature_bias_C": 1.29,
+    "RH_r": 0.696,
+    "WindSpeed_r": 0.46,
+    "Precip_r": 0.016
+  },
+  "crosscheck_weatherbit_vs_era5land": {
+    "Temperature_r": 0.965,
+    "WindSpeed_r": 0.52,
+    "Precip_r": 0.222
+  },
+  "crosscheck_cams_vs_weatherbit_pm25": {
+    "n": 35729,
+    "r": 0.452
+  },
+  "new_variable_signal_vs_pm25": {
+    "soil_moisture_0_to_7cm": -0.435,
+    "cloud_amt": -0.192,
+    "boundary_layer_height": -0.17,
+    "aerosol_optical_depth": 0.103,
+    "dust": 0.068
+  },
+  "interpretation": {
+    "soil_moisture": "Strongest new signal (r=-0.44): dry soil + dry air => more resuspended dust and dust transport.",
+    "boundary_layer": "Negative as expected: a taller boundary layer dilutes surface PM2.5.",
+    "dust_aoa": "Small positive: long-range dust contribution is minor in Hanoi.",
+    "power_vs_weatherbit": "Temperature agrees well (r=0.92) but precipitation does not (r=0.02): the two sources use different precipitation products, so rain-based features are source dependent."
+  },
+  "datasets": {
+    "era5land_hoankiem_hourly.csv": {
+      "rows": 40608
+    },
+    "nasa_power_hoankiem_hourly.csv": {
+      "rows": 40608
+    },
+    "cams_full_hoankiem_hourly.csv": {
+      "rows": 40608
+    },
+    "ensemble_forecast_spread.csv": {
+      "rows": 168
+    }
+  }
+}

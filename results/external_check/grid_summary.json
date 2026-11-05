@@ -1,0 +1,14 @@
+{
+  "n_request": 208,
+  "n_cells": 12,
+  "n_lat": 3,
+  "n_lon": 4,
+  "lat_step_km": 11.1,
+  "lon_step_km": 10.4,
+  "distinct_pm25_between_cells": 4,
+  "pm25_range": [
+    72.2,
+    83.4
+  ],
+  "compression_factor": 17.3
+}

@@ -1,0 +1,30 @@
+{
+  "selected_features": [
+    "PM25",
+    "Temperature",
+    "Relative Humidity",
+    "Precipitation",
+    "Clouds",
+    "Wind Speed",
+    "Solar Radiation",
+    "wind_sin",
+    "wind_cos"
+  ],
+  "input_window": 24,
+  "horizons": [
+    3,
+    6,
+    12,
+    24
+  ],
+  "target_column": "PM25_target",
+  "train_end": "2025-04-11 08:00:00",
+  "validation_start": "2025-04-11 09:00:00",
+  "validation_end": "2025-12-21 03:00:00",
+  "test_start": "2025-12-21 04:00:00",
+  "selection_scope": "CV trong Train 70%",
+  "selection_cv_mae": 18.00050973892212,
+  "test_used_for_selection": false,
+  "test_previously_explored_in_eda": true,
+  "validation_previously_used_for_selection": true
+}

@@ -1,0 +1,88 @@
+{
+  "project_window": {
+    "start": "2022-01-13 00:00:00",
+    "end": "2026-08-31 23:00:00",
+    "hours": 40608
+  },
+  "features": [
+    {
+      "name": "AQI",
+      "source": "Weatherbit (already in CSV)",
+      "status": "DROP",
+      "reason": "Composite index computed from several pollutants with the max sub-index; shown to disagree with PM2.5 (PM2.5 ~10 => AQI up to 161). Redundant and non-monotonic as a PM2.5 feature."
+    },
+    {
+      "name": "road_density / primary_road_km",
+      "source": "OSM Overpass",
+      "status": "STATIC_ONLY",
+      "reason": "Time-invariant. Cannot change the 3-24h forecast for a single point because the station location never changes. Only useful for spatial generalisation (LUR / multi-station), not for time-series forecasting.",
+      "values": {
+        "cells": 9,
+        "road_km_min": 6.12,
+        "road_km_max": 40.29
+      }
+    },
+    {
+      "name": "construction_sites / fuel_stations",
+      "source": "OSM Overpass",
+      "status": "STATIC_ONLY",
+      "reason": "Same as road density: static, low time variance, no per-hour signal."
+    },
+    {
+      "name": "fire_hotspot_count / fire_frp",
+      "source": "NASA FIRMS",
+      "status": "USABLE_FOR_CONTEXT_NOT_MODEL",
+      "reason": "Full 2022-2026 history downloaded with a MAP_KEY: 66,208 detections covering 1692/1692 days. Correlates r=+0.47 with PM2.5 (3-day window, 100 km) and r=+0.33 after removing month effects, but adds no MAE gain to the 3h model because PM10 already carries the dust signal.",
+      "overlap_hours_with_training_window": 0,
+      "fire_days_available": 5
+    },
+    {
+      "name": "traffic_flow (volume / congestion)",
+      "source": "Google Maps, TomTom, HERE",
+      "status": "PAID",
+      "reason": "No public free API for historical hourly traffic in Hanoi. Google Distance Matrix has no history; here/tomtom require a commercial licence. Proxy features (hour, dow, holiday, road_density) are already in the model."
+    },
+    {
+      "name": "ENSO / ONI",
+      "source": "NOAA CPC",
+      "status": "TESTED_NO_SIGNAL",
+      "reason": "Correlation with monthly PM2.5 r=-0.09 (p=0.50). Also monthly resolution, unusable for 3-24h horizon.",
+      "coverage": {
+        "start": "1950-01-15",
+        "end": "2026-08-15"
+      }
+    },
+    {
+      "name": "AirNow / EPA AQS observations",
+      "source": "US EPA",
+      "status": "NOT_APPLICABLE",
+      "reachable": false,
+      "error": "ConnectionError",
+      "scope": "US only"
+    },
+    {
+      "name": "PM10_PM25_ratio",
+      "source": "derived from existing columns",
+      "status": "USE",
+      "reason": "Ranked 2nd by importance in ablation, no new data needed."
+    },
+    {
+      "name": "Pressure_lag1 / Pressure_anom_24",
+      "source": "derived from existing columns",
+      "status": "USE",
+      "reason": "Inversion proxy; pressure autocorrelation makes these informative."
+    },
+    {
+      "name": "wd_sin / wd_cos / wind_calm / wind_roll6",
+      "source": "derived from existing columns",
+      "status": "USE",
+      "reason": "Fixes the circular-variable problem of raw bearings and encodes dispersion conditions (calm wind 38.7 vs windy 29.3 ug/m3)."
+    },
+    {
+      "name": "hours_since_rain",
+      "source": "derived from existing columns",
+      "status": "USE",
+      "reason": "Washout decays over hours; raw precipitation misses the decay."
+    }
+  ]
+}

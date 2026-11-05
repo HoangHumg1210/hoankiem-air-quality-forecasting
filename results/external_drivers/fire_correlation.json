@@ -1,0 +1,45 @@
+{
+  "fire_count_all": {
+    "r": 0.253,
+    "p": 4.33e-26,
+    "spearman": 0.379
+  },
+  "fire_count_50km": {
+    "r": 0.093,
+    "p": 0.000134,
+    "spearman": 0.16
+  },
+  "fire_count_100km": {
+    "r": 0.382,
+    "p": 7.16e-60,
+    "spearman": 0.292
+  },
+  "fire_frp_100km": {
+    "r": 0.353,
+    "p": 7.93e-51,
+    "spearman": 0.293
+  },
+  "fire_count_100km_roll3d": {
+    "r": 0.474,
+    "p": 1.53e-95,
+    "spearman": 0.362
+  },
+  "fire_frp_100km_roll7d": {
+    "r": 0.397,
+    "p": 4.26e-65,
+    "spearman": 0.363
+  },
+  "fire_dist_min_km": {
+    "r": -0.116,
+    "p": 1.85e-06,
+    "spearman": -0.112
+  },
+  "fire_count_100km_within_month": {
+    "r": 0.327,
+    "p": 1.73e-43
+  },
+  "fire_frp_100km_within_month": {
+    "r": 0.309,
+    "p": 1.09e-38
+  }
+}

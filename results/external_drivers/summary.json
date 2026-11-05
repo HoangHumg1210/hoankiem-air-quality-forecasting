@@ -1,0 +1,106 @@
+{
+  "firms": {
+    "window": "7 ngày gần nhất (không cần key)",
+    "bbox": [
+      20.6,
+      105.3,
+      21.5,
+      106.4
+    ],
+    "hotspots_in_bbox": 21,
+    "hotspots_within_50km_sample": 16,
+    "nearest_km": 10.9,
+    "frp_total": 94.72,
+    "sensors": [
+      "modis_7d",
+      "viirs_noaa20_7d",
+      "viirs_snpp_7d"
+    ],
+    "date_range": [
+      "2026-10-23",
+      "2026-10-28"
+    ],
+    "daily_counts": [
+      {
+        "acq_date": "2026-10-23",
+        "sensor": "modis_7d",
+        "hotspots": 1,
+        "frp_sum": 4.73
+      },
+      {
+        "acq_date": "2026-10-23",
+        "sensor": "viirs_snpp_7d",
+        "hotspots": 4,
+        "frp_sum": 17.23
+      },
+      {
+        "acq_date": "2026-10-25",
+        "sensor": "viirs_noaa20_7d",
+        "hotspots": 4,
+        "frp_sum": 24.09
+      },
+      {
+        "acq_date": "2026-10-25",
+        "sensor": "viirs_snpp_7d",
+        "hotspots": 2,
+        "frp_sum": 7.57
+      },
+      {
+        "acq_date": "2026-10-26",
+        "sensor": "viirs_noaa20_7d",
+        "hotspots": 1,
+        "frp_sum": 1.71
+      },
+      {
+        "acq_date": "2026-10-26",
+        "sensor": "viirs_snpp_7d",
+        "hotspots": 1,
+        "frp_sum": 0.58
+      },
+      {
+        "acq_date": "2026-10-27",
+        "sensor": "viirs_noaa20_7d",
+        "hotspots": 1,
+        "frp_sum": 2.45
+      },
+      {
+        "acq_date": "2026-10-27",
+        "sensor": "viirs_snpp_7d",
+        "hotspots": 1,
+        "frp_sum": 0.39
+      },
+      {
+        "acq_date": "2026-10-28",
+        "sensor": "modis_7d",
+        "hotspots": 1,
+        "frp_sum": 28.1
+      },
+      {
+        "acq_date": "2026-10-28",
+        "sensor": "viirs_noaa20_7d",
+        "hotspots": 2,
+        "frp_sum": 2.95
+      },
+      {
+        "acq_date": "2026-10-28",
+        "sensor": "viirs_snpp_7d",
+        "hotspots": 3,
+        "frp_sum": 4.92
+      }
+    ],
+    "note": "Lịch sử nhiều năm cần MAP_KEY miễn phí tại firms.modaps.eosdis.nasa.gov/api/map_key"
+  },
+  "osm": {
+    "cells": 9,
+    "cell_deg": "0.009 (≈1 km)",
+    "road_km_mean": 22.72,
+    "road_km_median": 24.24,
+    "road_km_max": 40.29,
+    "road_km_min": 6.12,
+    "primary_km_mean": 4.13,
+    "fuel_total": 6,
+    "construction_total": 15,
+    "center_cell_road_km": 24.24,
+    "center_cell_primary_km": 6.73
+  }
+}

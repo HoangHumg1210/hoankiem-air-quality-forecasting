@@ -1,0 +1,10 @@
+{
+  "rows": 40608,
+  "columns": 22,
+  "start": "2022-01-13 00:00:00",
+  "end": "2026-08-31 23:00:00",
+  "duplicate_timestamps": 0,
+  "missing": {
+    "Boundary Layer Height": 4365
+  }
+}

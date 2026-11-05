@@ -1,0 +1,39 @@
+{
+  "selected_features": [
+    "PM25",
+    "Temperature",
+    "Relative Humidity",
+    "Precipitation",
+    "Clouds",
+    "Wind Speed",
+    "Solar Radiation",
+    "wind_sin",
+    "wind_cos"
+  ],
+  "input_window": 24,
+  "horizons": [
+    3,
+    6,
+    12,
+    24
+  ],
+  "target_column": "PM25_target",
+  "train_end": "2025-04-11 08:00:00",
+  "validation_start": "2025-04-11 09:00:00",
+  "validation_end": "2025-12-21 03:00:00",
+  "test_start": "2025-12-21 04:00:00",
+  "selection_scope": "03B: so sánh bổ sung A/B bằng CV trong Train; không độc lập với chọn biến 03",
+  "selection_cv_mae": 17.987080574035645,
+  "test_used_for_selection": false,
+  "test_previously_explored_in_eda": true,
+  "validation_previously_used_for_selection": true,
+  "source_03_cv_mae": 18.00050973892212,
+  "is_weekend_kept": false,
+  "weekend_definition": "Local Time Việt Nam: thứ Bảy/Chủ nhật = 1, còn lại = 0",
+  "stability_rule": {
+    "min_mae_gain": 0.05,
+    "min_winning_folds": 2,
+    "winning_pairs": "> 50%"
+  },
+  "data_file": "/content/drive/MyDrive/data đa thời gian /results/stability/20260930_144704/data_features.csv"
+}

@@ -1,0 +1,26 @@
+{
+  "latitude": 21.0285,
+  "longitude": 105.8542,
+  "datasets": [
+    "airq_ba_dinh.csv",
+    "airq_dong_xuan.csv",
+    "airq_hai_ba_trung.csv",
+    "airq_hang_bac.csv",
+    "airq_hang_bai.csv",
+    "airq_hoankiem_center.csv",
+    "airq_long_bien.csv",
+    "cams_full_hoankiem_hourly.csv",
+    "ensemble_forecast_spread.csv",
+    "era5_hanoi_daily_1991_2025.csv",
+    "era5land_hoankiem_hourly.csv",
+    "oni_noaa_1950_2025.csv",
+    "oni_noaa_2022_2025.csv",
+    "weather_ba_dinh.csv",
+    "weather_dong_xuan.csv",
+    "weather_hai_ba_trung.csv",
+    "weather_hang_bac.csv",
+    "weather_hang_bai.csv",
+    "weather_hoankiem_center.csv",
+    "weather_long_bien.csv"
+  ]
+}
