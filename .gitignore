@@ -13,3 +13,6 @@ venv/
 # Local caches and archived notebook snapshots
 .pytest_cache/
 /notebooks.zip
+
+# Local backup files
+*.bak
