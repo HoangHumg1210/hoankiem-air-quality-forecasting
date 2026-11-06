@@ -1,10 +1,14 @@
 {
   "rows": 40608,
-  "columns": 22,
+  "columns": 23,
   "start": "2022-01-13 00:00:00",
   "end": "2026-08-31 23:00:00",
   "duplicate_timestamps": 0,
   "missing": {
-    "Boundary Layer Height": 4365
+    "AQI": 18,
+    "Boundary Layer Height": 4368,
+    "Fire Count 100km 3d": 24,
+    "Fire FRP 100km 7d": 24,
+    "Fire Dist Min": 24
   }
 }

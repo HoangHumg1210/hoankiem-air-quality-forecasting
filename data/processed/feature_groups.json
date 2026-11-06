@@ -1,0 +1,83 @@
+{
+  "target_history": [
+    "PM25"
+  ],
+  "pollutants": [
+    "PM10",
+    "CO",
+    "NO2",
+    "SO2",
+    "O3"
+  ],
+  "weather_base": [
+    "Temperature",
+    "Relative Humidity",
+    "Precipitation",
+    "Clouds",
+    "Pressure",
+    "Wind Speed"
+  ],
+  "weather_derived": [
+    "wind_sin",
+    "wind_cos",
+    "wind_calm",
+    "wind_roll6",
+    "Pressure_anom_24"
+  ],
+  "external": [
+    "Soil Moisture",
+    "Boundary Layer Height",
+    "Wind Speed 10m",
+    "Fire Count 100km 3d",
+    "Fire FRP 100km 7d"
+  ],
+  "derived": [
+    "PM10_PM25_ratio",
+    "hours_since_rain",
+    "rain_24h_sum",
+    "Accumulated Hours of Rain",
+    "IsHoliday"
+  ],
+  "time": [
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "month_sin",
+    "month_cos"
+  ],
+  "pm25_history_tabular_only": [
+    "PM25_lag_1",
+    "PM25_lag_2",
+    "PM25_lag_3",
+    "PM25_lag_6",
+    "PM25_lag_8",
+    "PM25_lag_12",
+    "PM25_lag_24",
+    "PM25_lag_36",
+    "PM25_lag_48",
+    "PM25_lag_72",
+    "PM25_lag_96",
+    "PM25_lag_120",
+    "PM25_lag_144",
+    "PM25_lag_168",
+    "PM25_roll_mean_6",
+    "PM25_roll_std_6",
+    "PM25_roll_mean_12",
+    "PM25_roll_std_12",
+    "PM25_roll_mean_24",
+    "PM25_roll_std_24",
+    "PM25_roll_mean_72",
+    "PM25_roll_std_72",
+    "PM25_roll_max_6",
+    "PM25_roll_min_6",
+    "PM25_roll_max_24",
+    "PM25_roll_min_24",
+    "PM25_diff_1",
+    "PM25_diff_24",
+    "PM25_same_hour_mean_3d",
+    "PM25_same_hour_mean_7d",
+    "PM25_same_hour_std_7d",
+    "PM25_same_hour_max_7d"
+  ]
+}
