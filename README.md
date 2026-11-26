@@ -12,7 +12,13 @@ Run notebooks from the repository root with a compatible Python environment:
 3. `notebooks/03_merge.ipynb`: merge cleaned observations with external weather and fire data into `data/processed/merged_data.csv`.
 4. `notebooks/04_eda.ipynb`: explore the merged dataset.
 5. `notebooks/05_features.ipynb`: export `data/processed/feature_data.csv` and feature-group metadata.
-6. `notebooks/06_feature_selection.ipynb`: run feature-selection experiments.
+6. `notebooks/06_feature_selection.ipynb`: choose one shared feature set and window (GRU proxy, time-series CV inside Train). ERA5 columns are excluded by default (`USE_REANALYSIS = False`) because they are not available for online forecasting.
+7. `notebooks/07_gru.ipynb`: tune the GRU on Validation (random search), then train the best config with 3 seeds.
+8. `notebooks/08_transformer.ipynb`: same procedure and budget for the Transformer.
+9. `notebooks/09_evaluation.ipynb`: one-time Test comparison of GRU, Transformer, persistence and seasonal naive (tables, Diebold-Mariano tests, figures in `results/report/`).
+10. `notebooks/10_benchmark.ipynb`: compare both models with published forecasts (CAMS from the ADS archive, Open-Meteo CAMS, bias-corrected CAMS) at the same issue times and horizons; reports the % MAE reduction.
+
+Notebooks 07-09 share `src/forecasting.py` (data windows, models, training loop, metrics). Training is meant for a GPU (e.g. Colab).
 
 The extraction notebook reads its API key from the environment:
 
@@ -32,11 +38,13 @@ python -m pip install -r requirements.txt
 
 Select this environment as the notebook kernel. Model training requires a Python/TensorFlow-compatible environment.
 
-## Current limitations
+## Other scripts
 
-- Trained model bundles, the model registry, previous experiment outputs, and the automated test suite have been removed in this revision. Their previous versions remain in Git history.
-- The Streamlit and training scripts remain, but the application is not ready to run from this checkout: its former model bundles and `data/processed/data2225_done.csv` are absent.
-- The feature-selection notebook currently expects `data/processed/split_dates.csv`, while the retained split file is `results/split_dates.csv`. Align that input before executing feature selection.
-- Notebook files and saved outputs are included; this revision does not establish a fresh end-to-end execution or forecasting-quality result.
+- `src/ghap_spatial_check.py` (run via `run_ghap.bat`): fetches GHAP 1 km PM2.5 for Hoan Kiem and compares it with Weatherbit; outputs go to `results/ghap_check/`.
+- `src/fetch_era5_blh.py`: downloads ERA5 hourly Boundary Layer Height for Hoan Kiem from Google Earth Engine into `data/external/era5/` (`py -3.13 src/fetch_era5_blh.py --project <gee-project>`). It replaces the Open-Meteo BLH series, which is missing Jan-Jun 2024 and switches to ECMWF IFS from Sep 2024.
+- `src/fetch_benchmarks.py`: downloads benchmark forecasts into `data/external/benchmarks/`. `openmeteo` needs no key; `cams` needs a free ADS account (key in `~/.cdsapirc`) and `pip install cdsapi xarray netCDF4`.
+- `src/fix.py`: extends `data/external/firms/hanoi_fires_2022_2026.csv` up to 2026-08-31 (needs `FIRMS_MAP_KEY`). Re-run `03_merge.ipynb` afterwards.
 
-See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for the current layout.
+## Current status
+
+- Notebooks 02-05 have been executed; 06-09 have not been run yet.
