@@ -23,6 +23,16 @@ TARGET = 'PM25'
 # MAX_WINDOW hours are complete, whatever window the model actually uses.
 MAX_WINDOW = 168
 
+# Reanalysis inputs are published days late. In operation they are replaced by (see
+# src/fetch_operational_met.py): ('forecast', column) = Open-Meteo forecast calibrated to the
+# training scale on Validation; ('lag', hours) = the latest value that would already be published.
+OPERATIONAL = {
+    'Boundary Layer Height': ('forecast', 'blh_forecast'),
+    'Wind Speed 10m': ('forecast', 'wind10_forecast'),
+    'Soil Moisture': ('lag', 120),
+}
+OPERATIONAL_FILE = Path('data') / 'external' / 'operational' / 'openmeteo_forecast_hourly.csv'
+
 
 # ----------------------------------------------------------------------------- setup
 
@@ -62,9 +72,14 @@ class WindowData:
     A sample at position p uses rows p-window+1 .. p as input and PM25 at p+h as target.
     It belongs to a split when its issue time and all its target times fall in that split.
     Inputs are standardised with Train statistics only.
+
+    operational=True: every input hour used by a Test sample gets the real-time substitute of the
+    reanalysis columns (OPERATIONAL) instead of the reanalysis value, i.e. what the model would
+    really see online. Samples and scaling stay identical to operational=False.
     """
 
-    def __init__(self, root: Path, features: list[str], horizons=HORIZONS, max_window=MAX_WINDOW):
+    def __init__(self, root: Path, features: list[str], horizons=HORIZONS, max_window=MAX_WINDOW,
+                 operational=False):
         df = pd.read_csv(root / 'data' / 'processed' / 'feature_data.csv', parse_dates=['Local Time'])
         df = df.set_index('Local Time').sort_index()
         steps = df.index.to_series().diff().dropna()
@@ -99,6 +114,38 @@ class WindowData:
             self.positions[name] = pos[(issue >= start) & (last <= end)]
 
         self.high_threshold = float(np.nanquantile(self.pm[train_rows], 0.9))
+        self.substitution = None
+        if operational:
+            self._apply_operational(root, max_window)
+
+    def _apply_operational(self, root: Path, max_window):
+        op = pd.read_csv(root / OPERATIONAL_FILE, parse_dates=['time_local'])
+        op = op.set_index('time_local').reindex(self.index)
+        swap = self.index >= self.splits['Test'][0] - pd.Timedelta(hours=max_window - 1)
+        fit = (self.index >= self.splits['Validation'][0]) & ~swap   # calibrate on Validation only
+        rows = []
+        for col, (kind, arg) in OPERATIONAL.items():
+            if col not in self.features:
+                continue
+            j = self.features.index(col)
+            orig = self.raw[:, j].copy()
+            if kind == 'forecast':
+                src = op[arg].to_numpy(dtype='float64')
+                ok = fit & np.isfinite(src) & np.isfinite(orig)
+                b, a = np.polyfit(src[ok], orig[ok], 1)
+                new = pd.Series(np.clip(a + b * src, 0, None)).ffill(limit=6).to_numpy()
+                how = f'Open-Meteo forecast `{arg}`, hiệu chỉnh {a:.3g} + {b:.3g}·x (học trên {ok.sum()} giờ Validation)'
+            else:
+                new = pd.Series(orig).shift(arg).to_numpy()
+                how = f'giá trị đã công bố gần nhất (trễ {arg} giờ)'
+            assert np.isfinite(new[swap]).all(), f'Nguồn thay thế của {col} còn thiếu trong Test'
+            rows.append({'Feature': col, 'Nguồn khi chạy thật': how,
+                         'Tương quan với gốc (Test)': float(np.corrcoef(orig[swap], new[swap])[0, 1]),
+                         'MAE so với gốc (Test)': float(np.mean(np.abs(orig[swap] - new[swap])))})
+            self.raw[swap, j] = new[swap].astype('float32')
+        self.substitution = pd.DataFrame(rows)
+        scaled = (self.raw - self.x_mean) / self.x_std
+        self.scaled = np.nan_to_num(scaled, nan=0.0).astype('float32')
 
     def summary(self) -> pd.DataFrame:
         return pd.DataFrame([{'Split': k, 'N_samples': len(p),
@@ -365,10 +412,16 @@ def tune(kind, configs, data: WindowData, out_csv: Path, seed=42, **fit_kw):
     return pd.DataFrame(rows).sort_values('val_MAE').reset_index(drop=True)
 
 
-def train_final(kind, cfg, data: WindowData, seeds, out_dir: Path, model_name, **fit_kw):
-    """Train the chosen config with several seeds; the reported model is the seed average."""
+def needs_operational(features) -> bool:
+    return any(f in OPERATIONAL for f in features)
+
+
+def train_final(kind, cfg, data: WindowData, seeds, out_dir: Path, model_name, data_op=None, **fit_kw):
+    """Train the chosen config with several seeds; the reported model is the seed average.
+    data_op: WindowData(operational=True); adds Test predictions with real-time inputs."""
     out_dir.mkdir(parents=True, exist_ok=True)
     preds = {'Validation': [], 'Test': []}
+    op_preds = []
     seed_rows = []
     for seed in seeds:
         model, info = fit(kind, cfg, data, seed, **fit_kw)
@@ -379,11 +432,22 @@ def train_final(kind, cfg, data: WindowData, seeds, out_dir: Path, model_name, *
             preds[split].append(p)
             seed_rows.append({'Seed': seed, 'Split': split, 'Best_epoch': info['best_epoch'],
                               'MAE': mae(data.targets(data.positions[split]), p)})
+        if data_op is not None:
+            p = predict(model, cfg, info, data_op, 'Test')
+            op_preds.append(p)
+            seed_rows.append({'Seed': seed, 'Split': 'Test (vận hành)', 'Best_epoch': info['best_epoch'],
+                              'MAE': mae(data.targets(data.positions['Test']), p)})
         free(model)
         print(f'seed {seed}: xong')
     ensemble = {split: np.mean(v, axis=0) for split, v in preds.items()}
     for split, p in ensemble.items():
         to_long(data, split, p, model_name).to_csv(out_dir / f'predictions_{split.lower()}.csv', index=False)
+    if data_op is not None:
+        assert np.array_equal(data_op.positions['Test'], data.positions['Test'])
+        ensemble['Test_operational'] = np.mean(op_preds, axis=0)
+        to_long(data, 'Test', ensemble['Test_operational'], model_name).to_csv(
+            out_dir / 'predictions_test_operational.csv', index=False)
+        data_op.substitution.to_csv(out_dir / 'operational_substitution.csv', index=False)
     (out_dir / 'final_config.json').write_text(json.dumps(
         {'model': model_name, 'config': cfg, 'seeds': list(seeds), 'features': data.features,
          'horizons': data.H.tolist()}, indent=2, ensure_ascii=False), encoding='utf-8')

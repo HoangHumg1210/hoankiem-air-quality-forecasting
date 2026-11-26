@@ -1,0 +1,112 @@
+{
+  "selected_features": [
+    "PM25",
+    "Relative Humidity",
+    "Precipitation",
+    "Pressure",
+    "Wind Speed",
+    "IsHoliday",
+    "Wind Speed 10m"
+  ],
+  "input_window": 24,
+  "horizons": [
+    3,
+    6,
+    12,
+    24
+  ],
+  "target_column": "PM25",
+  "train_end": "2024-08-31 23:00:00",
+  "validation_start": "2024-09-01 00:00:00",
+  "validation_end": "2025-08-31 23:00:00",
+  "test_start": "2025-09-01 00:00:00",
+  "data_source": "feature_data.csv",
+  "total_candidates": 30,
+  "n_selected": 7,
+  "selected_external": [
+    "Wind Speed 10m"
+  ],
+  "selected_derived": [
+    "IsHoliday"
+  ],
+  "selected_weather_derived": [],
+  "selection_scope": "CV trong Train (đến 31/08/2024)",
+  "use_reanalysis": false,
+  "selection_cv_mae": 14.94033416112264,
+  "selection_cv_mae_std": 5.67755698774244,
+  "persistence_cv_mae": 17.435211181640625,
+  "seasonal_naive_cv_mae": 19.032540639241535,
+  "blend_baseline_cv_mae": 16.262542724609375,
+  "selection_rule": "paired fold x seed; add if gain >= MIN_GAIN and > 1 SE; remove if loss < MIN_GAIN and <= 1 SE; group/window = simplest within 1 SE; final check with GRU + Transformer: keep SELECTED if within 1 SE of best for both",
+  "min_gain": 0.05,
+  "model_check_set": "SELECTED",
+  "model_check": [
+    {
+      "Model": "GRU",
+      "Set": "SELECTED",
+      "N_features": 7,
+      "CV_MAE": 14.9403,
+      "Rel_MAE": 1.0,
+      "Delta_vs_best": 0.0,
+      "SE": 0.0,
+      "Within_1SE": true
+    },
+    {
+      "Model": "GRU",
+      "Set": "GROUP_CHOSEN",
+      "N_features": 7,
+      "CV_MAE": 15.1714,
+      "Rel_MAE": 1.0155,
+      "Delta_vs_best": 0.231,
+      "SE": 0.0568,
+      "Within_1SE": false
+    },
+    {
+      "Model": "GRU",
+      "Set": "FULL",
+      "N_features": 30,
+      "CV_MAE": 15.9308,
+      "Rel_MAE": 1.0663,
+      "Delta_vs_best": 0.9904,
+      "SE": 0.2423,
+      "Within_1SE": false
+    },
+    {
+      "Model": "Transformer",
+      "Set": "SELECTED",
+      "N_features": 7,
+      "CV_MAE": 15.1198,
+      "Rel_MAE": 1.0,
+      "Delta_vs_best": 0.0,
+      "SE": 0.0,
+      "Within_1SE": true
+    },
+    {
+      "Model": "Transformer",
+      "Set": "GROUP_CHOSEN",
+      "N_features": 7,
+      "CV_MAE": 15.3721,
+      "Rel_MAE": 1.0167,
+      "Delta_vs_best": 0.2523,
+      "SE": 0.101,
+      "Within_1SE": false
+    },
+    {
+      "Model": "Transformer",
+      "Set": "FULL",
+      "N_features": 30,
+      "CV_MAE": 15.7037,
+      "Rel_MAE": 1.0386,
+      "Delta_vs_best": 0.5839,
+      "SE": 0.1581,
+      "Within_1SE": false
+    }
+  ],
+  "seeds": [
+    42,
+    123
+  ],
+  "test_used_for_selection": false,
+  "test_previously_explored_in_eda": true,
+  "validation_previously_used_for_selection": true
+}
